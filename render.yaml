@@ -1,0 +1,29 @@
+# Plantilla para la Fase 2 (despliegue en Render), mismo patrón que
+# Control Autos. Revisa los valores marcados como "sync: false" en el
+# dashboard de Render antes de desplegar -- no se suben en este archivo.
+services:
+  - type: web
+    name: control-familiar
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: cd backend && npm install --include=dev && npm run build && cd ../frontend && npm install --include=dev && npm run build
+    startCommand: node backend/dist/server.js
+    healthCheckPath: /api/salud
+    disk:
+      name: control-familiar-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RP_ID
+        sync: false
+      - key: RP_NAME
+        value: Control Familiar
+      - key: ORIGIN
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_FILE
+        value: /var/data/controlfamiliar.db
