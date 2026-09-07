@@ -8,6 +8,17 @@ export class ApiError extends Error {
   }
 }
 
+// El backend puede rechazar con 401 en cualquier momento, no solo por no
+// tener cookie: por ejemplo, si la sesión se cerró por inactividad (ver
+// requireAuth en el backend). AuthProvider se suscribe aquí para enterarse
+// de inmediato y mandar a la persona de vuelta a la pantalla de passkey,
+// venga la llamada que venga (no solo la del propio chequeo de sesión).
+type AlSesionExpirada = () => void;
+let alSesionExpirada: AlSesionExpirada | null = null;
+export function enSesionExpirada(cb: AlSesionExpirada | null) {
+  alSesionExpirada = cb;
+}
+
 async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promise<T> {
   // Ojo: el "Content-Type: application/json" solo se manda cuando SÍ hay
   // body. Fastify rechaza con 400 "Bad Request" cualquier petición (por
@@ -22,6 +33,7 @@ async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promise<T> {
     ...opciones,
     headers,
   });
+  if (res.status === 401) alSesionExpirada?.();
   const esJson = res.headers.get('content-type')?.includes('application/json');
   const cuerpo = esJson ? await res.json() : null;
   if (!res.ok) throw new ApiError(cuerpo?.error || `Error ${res.status}`, cuerpo);
@@ -93,6 +105,11 @@ export type Resumen = {
 // ---------- Llamadas ----------
 
 export const obtenerEstado = () => api.get<{ hayMiembros: boolean }>('/api/auth/estado');
+// Se llama cuando se detecta una interacción real de la persona (clic,
+// tecla, touch, scroll) mientras hay sesión -- es lo que evita que se
+// cierre por inactividad (ver AuthProvider). No se llama en cada petición
+// normal, solo desde ese conteo de inactividad.
+export const marcarInteraccion = () => api.post<{ ok: true }>('/api/auth/actividad');
 
 export const listarCasas = () => api.get<Casa[]>('/api/casas');
 export const crearCasa = (nombre: string) => api.post<Casa>('/api/casas', { nombre });

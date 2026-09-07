@@ -105,6 +105,10 @@ const columnasCategorias = db.prepare('PRAGMA table_info(categorias)').all() as 
 if (!columnasCategorias.some((c) => c.name === 'activo')) {
   db.exec('ALTER TABLE categorias ADD COLUMN activo INTEGER NOT NULL DEFAULT 1');
 }
+const columnasMiembros = db.prepare('PRAGMA table_info(miembros)').all() as { name: string }[];
+if (!columnasMiembros.some((c) => c.name === 'ultima_interaccion')) {
+  db.exec('ALTER TABLE miembros ADD COLUMN ultima_interaccion TEXT');
+}
 
 // ---------- Casas ----------
 
@@ -275,7 +279,35 @@ export function marcarActividad(miembroId: string) {
 }
 
 export function cerrarActividad(miembroId: string) {
-  db.prepare('UPDATE miembros SET ultima_actividad = NULL WHERE id = ?').run(miembroId);
+  db.prepare('UPDATE miembros SET ultima_actividad = NULL, ultima_interaccion = NULL WHERE id = ?').run(miembroId);
+}
+
+// ---------- Cierre de sesión por inactividad ----------
+// Distinto de "última actividad" de arriba (que solo sirve para mostrar
+// "en línea" y se refresca con cualquier petición, incluyendo el "latido"
+// automático de presencia). "última interacción" solo se actualiza cuando
+// el frontend reporta una interacción real de la persona (clic, tecla,
+// touch, scroll -- ver POST /api/auth/actividad), así el "latido" no
+// mantiene viva una sesión de alguien que ya no está frente a la pantalla.
+export const IDLE_TIMEOUT_SEGUNDOS = 30;
+
+export function marcarInteraccion(miembroId: string) {
+  db.prepare("UPDATE miembros SET ultima_interaccion = datetime('now') WHERE id = ?").run(miembroId);
+}
+
+// true si hubo una interacción real en los últimos IDLE_TIMEOUT_SEGUNDOS.
+// requireAuth la usa para rechazar (y borrar) una sesión inactiva, aunque
+// la cookie en sí siga viva -- así, un dispositivo compartido que se queda
+// quieto vuelve a pedir passkey incluso si alguien recarga la página
+// después, no solo mientras la pestaña sigue abierta.
+export function sesionSigueActiva(miembroId: string): boolean {
+  const fila = db
+    .prepare(
+      `SELECT (ultima_interaccion IS NOT NULL AND ultima_interaccion >= datetime('now', ?)) as activa
+       FROM miembros WHERE id = ?`
+    )
+    .get(`-${IDLE_TIMEOUT_SEGUNDOS} seconds`, miembroId) as { activa: number } | undefined;
+  return Boolean(fila?.activa);
 }
 
 // ---------- Credenciales (passkeys) ----------

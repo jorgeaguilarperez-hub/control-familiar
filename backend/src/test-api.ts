@@ -33,12 +33,19 @@ const {
   buscarMiembroPorId,
   crearCredencial,
   credencialesDeMiembro,
+  marcarInteraccion,
+  sesionSigueActiva,
+  db,
 } = await import('./lib/db.js');
 const { estadoDePresupuesto } = await import('./lib/presupuestos.js');
 const { firmarSesion, COOKIE } = await import('./lib/jwt.js');
 
 function cookieDeSesion(miembro: { id: string; nombre: string; rol: 'admin' | 'miembro' }) {
   const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: miembro.rol });
+  // Un login real marca "interacción" en cuanto entra (ver auth.ts) -- se
+  // imita aquí para que una cookie recién armada en las pruebas no caiga
+  // de inmediato en el candado de "sesión cerrada por inactividad".
+  marcarInteraccion(miembro.id);
   return `${COOKIE.name}=${token}`;
 }
 
@@ -244,6 +251,42 @@ async function main() {
   });
   ok(reactivarAdminOriginal.statusCode === 200, 'se restaura al admin original como activo');
   eliminarMiembro(otroAdmin.id);
+
+  // --- Cierre de sesión por inactividad: si no hubo ninguna interacción
+  // real (POST /api/auth/actividad) en los últimos 30s, requireAuth debe
+  // rechazar aunque la cookie siga siendo válida por dentro. Se prueba
+  // retrocediendo el reloj a mano (vía SQL directo), sin esperar 30
+  // segundos de verdad.
+  const miembroInactividad = crearMiembro({ nombre: 'Miembro para probar inactividad', casaId: null, rol: 'miembro' });
+  const cookieInactividad = cookieDeSesion(miembroInactividad);
+
+  const antesDeExpirar = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie: cookieInactividad } });
+  ok(antesDeExpirar.statusCode === 200, 'recién "entrado" (cookieDeSesion ya marca interacción), la sesión sigue viva');
+
+  db.prepare("UPDATE miembros SET ultima_interaccion = datetime('now', '-31 seconds') WHERE id = ?").run(miembroInactividad.id);
+  ok(!sesionSigueActiva(miembroInactividad.id), 'sesionSigueActiva detecta que ya pasaron más de 30s sin interacción real');
+
+  const despuesDeExpirar = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie: cookieInactividad } });
+  ok(despuesDeExpirar.statusCode === 401, 'sin interacción real por más de 30s, la sesión se rechaza aunque la cookie siga firmada');
+  ok(
+    String(despuesDeExpirar.headers['set-cookie'] ?? '').includes(`${COOKIE.name}=;`),
+    'al rechazar por inactividad, el servidor también borra la cookie'
+  );
+
+  // El "latido" de presencia (usado solo para "en línea") no puede resucitar
+  // por sí solo una sesión ya expirada.
+  const pingTrasExpirar = await app.inject({ method: 'POST', url: '/api/auth/actividad', headers: { cookie: cookieInactividad } });
+  ok(pingTrasExpirar.statusCode === 401, 'una sesión ya expirada no puede "revivirse" llamando a /api/auth/actividad');
+
+  // Pero con una sesión todavía viva, si el frontend reporta una interacción
+  // real, sí se extiende la ventana de los 30s.
+  const cookieInactividad2 = cookieDeSesion(miembroInactividad);
+  db.prepare("UPDATE miembros SET ultima_interaccion = datetime('now', '-20 seconds') WHERE id = ?").run(miembroInactividad.id);
+  const ping = await app.inject({ method: 'POST', url: '/api/auth/actividad', headers: { cookie: cookieInactividad2 } });
+  ok(ping.statusCode === 200, 'con sesión viva, POST /api/auth/actividad marca la interacción');
+  ok(sesionSigueActiva(miembroInactividad.id), 'tras marcar interacción, sesionSigueActiva vuelve a ser cierto');
+
+  eliminarMiembro(miembroInactividad.id);
 
   // --- Cambiar el rol de un miembro (a diferencia de dar de baja/borrar,
   // esto ya lo soportaba la ruta PATCH -- se prueba aquí de una vez que se

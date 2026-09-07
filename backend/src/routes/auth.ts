@@ -18,6 +18,7 @@ import {
   buscarInvitacionValida,
   marcarInvitacionUsada,
   cerrarActividad,
+  marcarInteraccion,
   type MiembroConEstado,
 } from '../lib/db.js';
 import { guardarChallenge, tomarChallenge } from '../lib/challengeStore.js';
@@ -125,6 +126,7 @@ export default async function authRoutes(app: FastifyInstance) {
 
       const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: 'admin' });
       reply.setCookie(COOKIE.name, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: COOKIE.maxAge });
+      marcarInteraccion(miembro.id); // arranca el reloj de inactividad justo al entrar
       return { ok: true, miembro: miembroParaCliente(miembro) };
     }
   );
@@ -181,6 +183,7 @@ export default async function authRoutes(app: FastifyInstance) {
 
       const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: miembro.rol });
       reply.setCookie(COOKIE.name, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: COOKIE.maxAge });
+      marcarInteraccion(miembro.id); // arranca el reloj de inactividad justo al entrar
       return { ok: true, miembro: miembroParaCliente(miembro) };
     }
   );
@@ -236,6 +239,7 @@ export default async function authRoutes(app: FastifyInstance) {
 
       const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: miembro.rol });
       reply.setCookie(COOKIE.name, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: COOKIE.maxAge });
+      marcarInteraccion(miembro.id); // arranca el reloj de inactividad justo al entrar
       return { ok: true, miembro: miembroParaCliente(miembro) };
     }
   );
@@ -245,6 +249,19 @@ export default async function authRoutes(app: FastifyInstance) {
     const miembro = buscarMiembroPorId(req.miembro.miembroId);
     if (!miembro) return reply.code(401).send({ error: 'No autenticado' });
     return { miembro: miembroParaCliente(miembro) };
+  });
+
+  // El frontend llama esto (con límite, cada pocos segundos como máximo)
+  // cada vez que detecta una interacción real de la persona (clic, tecla,
+  // touch, scroll) mientras hay sesión -- es lo único que mantiene viva la
+  // sesión frente al cierre por inactividad de requireAuth. A propósito no
+  // se marca en cada petición (el "latido" de presencia de /api/auth/me
+  // cada 45s, usado solo para mostrar "en línea", no cuenta como
+  // interacción real, o nunca se cerraría la sesión de alguien que dejó la
+  // pestaña abierta y se fue).
+  app.post('/api/auth/actividad', { preHandler: requireAuth }, async (req) => {
+    if (req.miembro) marcarInteraccion(req.miembro.miembroId);
+    return { ok: true };
   });
 
   app.post('/api/auth/logout', { preHandler: identificarSiHaySesion }, async (req: FastifyRequest, reply) => {
