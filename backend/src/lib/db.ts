@@ -130,6 +130,13 @@ if (!columnasMiembros.some((c) => c.name === 'ultima_interaccion')) {
 if (!columnasMiembros.some((c) => c.name === 'todas_las_casas')) {
   db.exec('ALTER TABLE miembros ADD COLUMN todas_las_casas INTEGER NOT NULL DEFAULT 0');
 }
+// Además del administrador (que nunca tiene presupuesto, por rol), un
+// miembro normal puede quedar marcado a mano como "sin presupuesto" -- por
+// ejemplo alguien de quien no se quiere llevar ese control. Igual que el
+// admin, no participa del desglose por persona en reportes/gráficas.
+if (!columnasMiembros.some((c) => c.name === 'sin_presupuesto')) {
+  db.exec('ALTER TABLE miembros ADD COLUMN sin_presupuesto INTEGER NOT NULL DEFAULT 0');
+}
 
 // Primera vez que corre esta versión: lo que ya hubiera en el viejo
 // miembros.casa_id (una sola casa) se copia a la tabla nueva, para que
@@ -203,6 +210,7 @@ export type Miembro = {
   todasLasCasas: boolean;
   rol: Rol;
   activo: boolean;
+  sinPresupuesto: boolean;
 };
 
 export type MiembroConEstado = Miembro & {
@@ -214,7 +222,7 @@ export type MiembroConEstado = Miembro & {
 };
 
 const SELECT_MIEMBRO = `
-  SELECT m.id, m.nombre, m.rol, m.activo, m.todas_las_casas as todasLasCasas,
+  SELECT m.id, m.nombre, m.rol, m.activo, m.todas_las_casas as todasLasCasas, m.sin_presupuesto as sinPresupuesto,
          (SELECT json_group_array(t.id) FROM (
             SELECT cc.id FROM miembro_casas mc JOIN casas cc ON cc.id = mc.casa_id
             WHERE mc.miembro_id = m.id ORDER BY cc.nombre
@@ -238,6 +246,7 @@ function filaAMiembro(fila: any): MiembroConEstado {
     todasLasCasas: Boolean(fila.todasLasCasas),
     rol: fila.rol,
     activo: Boolean(fila.activo),
+    sinPresupuesto: Boolean(fila.sinPresupuesto),
     enLinea: Boolean(fila.enLinea),
     tienePasskey: fila.numCredenciales > 0,
     numCredenciales: fila.numCredenciales,
@@ -283,16 +292,24 @@ export function crearMiembro(datos: { nombre: string; casaIds?: string[]; todasL
 
 export function editarMiembro(
   id: string,
-  datos: { nombre?: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol; activo?: boolean }
+  datos: {
+    nombre?: string;
+    casaIds?: string[];
+    todasLasCasas?: boolean;
+    rol?: Rol;
+    activo?: boolean;
+    sinPresupuesto?: boolean;
+  }
 ): MiembroConEstado | undefined {
   const actual = buscarMiembroPorId(id);
   if (!actual) return undefined;
   const todasLasCasas = datos.todasLasCasas !== undefined ? datos.todasLasCasas : actual.todasLasCasas;
-  db.prepare('UPDATE miembros SET nombre = ?, rol = ?, activo = ?, todas_las_casas = ? WHERE id = ?').run(
+  db.prepare('UPDATE miembros SET nombre = ?, rol = ?, activo = ?, todas_las_casas = ?, sin_presupuesto = ? WHERE id = ?').run(
     datos.nombre ?? actual.nombre,
     datos.rol ?? actual.rol,
     datos.activo !== undefined ? (datos.activo ? 1 : 0) : (actual.activo ? 1 : 0),
     todasLasCasas ? 1 : 0,
+    datos.sinPresupuesto !== undefined ? (datos.sinPresupuesto ? 1 : 0) : (actual.sinPresupuesto ? 1 : 0),
     id
   );
 
@@ -305,8 +322,13 @@ export function editarMiembro(
 
   // El administrador no participa en presupuestos (es un rol solo para
   // administrar el sistema, no para gastar) -- al ascender a alguien se le
-  // limpia cualquier presupuesto que ya tuviera, porque deja de aplicar.
-  if (datos.rol === 'admin' && actual.rol !== 'admin') {
+  // limpia cualquier presupuesto que ya tuviera, porque deja de aplicar. Lo
+  // mismo aplica a un miembro normal al que se marca "sin presupuesto" a
+  // mano: si ya tenía uno asignado, deja de aplicar y se limpia.
+  if (
+    (datos.rol === 'admin' && actual.rol !== 'admin') ||
+    (datos.sinPresupuesto === true && !actual.sinPresupuesto)
+  ) {
     db.prepare('DELETE FROM presupuestos WHERE miembro_id = ?').run(id);
   }
 

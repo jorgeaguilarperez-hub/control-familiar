@@ -54,7 +54,7 @@ export default async function miembrosRoutes(app: FastifyInstance) {
 
   app.patch<{
     Params: { id: string };
-    Body: { nombre?: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol; activo?: boolean };
+    Body: { nombre?: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol; activo?: boolean; sinPresupuesto?: boolean };
   }>(
     '/api/miembros/:id',
     { preHandler: requireAdmin },

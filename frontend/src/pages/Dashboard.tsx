@@ -99,9 +99,15 @@ export function Dashboard() {
         <p className="text-sm text-[color:var(--text-dim)]">Tu presupuesto de este mes</p>
       </div>
 
-      <div className="glass rounded-2xl p-5">
-        <BudgetBar gastado={miResumen?.gastado ?? 0} presupuesto={miResumen?.presupuesto ?? null} estado={miResumen?.estado ?? 'ok'} />
-      </div>
+      {miembro?.sinPresupuesto ? (
+        <div className="glass rounded-2xl p-5">
+          <p className="text-sm text-[color:var(--text-dim)]">No tienes presupuesto asignado este mes.</p>
+        </div>
+      ) : (
+        <div className="glass rounded-2xl p-5">
+          <BudgetBar gastado={miResumen?.gastado ?? 0} presupuesto={miResumen?.presupuesto ?? null} estado={miResumen?.estado ?? 'ok'} />
+        </div>
+      )}
 
       <div className="glass rounded-2xl p-5">
         <h2 className="heading text-base font-semibold mb-4">{editando ? 'Editar gasto' : 'Agregar gasto'}</h2>

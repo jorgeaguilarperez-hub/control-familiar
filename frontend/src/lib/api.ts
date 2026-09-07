@@ -66,6 +66,10 @@ export type Miembro = {
   todasLasCasas: boolean;
   rol: Rol;
   activo: boolean;
+  // Un miembro normal puede marcarse a mano como "sin presupuesto" (por
+  // ejemplo alguien de quien no se quiere llevar ese control) -- igual que
+  // el administrador, no participa del desglose por persona en reportes.
+  sinPresupuesto: boolean;
   enLinea: boolean;
   tienePasskey: boolean;
   numCredenciales: number;
@@ -132,7 +136,7 @@ export const crearMiembro = (datos: { nombre: string; casaIds?: string[]; todasL
   api.post<{ miembro: Miembro; invitacion: { token: string; ruta: string } }>('/api/miembros', datos);
 export const editarMiembro = (
   id: string,
-  datos: Partial<{ nombre: string; casaIds: string[]; todasLasCasas: boolean; rol: Rol; activo: boolean }>
+  datos: Partial<{ nombre: string; casaIds: string[]; todasLasCasas: boolean; rol: Rol; activo: boolean; sinPresupuesto: boolean }>
 ) => api.patch<Miembro>(`/api/miembros/${id}`, datos);
 export const borrarMiembro = (id: string) => api.del<{ ok: true; teniaGastos: boolean }>(`/api/miembros/${id}`);
 export const regenerarInvitacion = (id: string) =>

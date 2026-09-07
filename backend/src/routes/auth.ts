@@ -30,7 +30,14 @@ const RP_NAME = process.env.RP_NAME || 'Control Familiar';
 const ORIGINS = (process.env.ORIGIN || 'http://localhost:5173').split(',').map((o) => o.trim());
 
 function miembroParaCliente(m: MiembroConEstado) {
-  return { id: m.id, nombre: m.nombre, casaIds: m.casaIds, todasLasCasas: m.todasLasCasas, rol: m.rol };
+  return {
+    id: m.id,
+    nombre: m.nombre,
+    casaIds: m.casaIds,
+    todasLasCasas: m.todasLasCasas,
+    rol: m.rol,
+    sinPresupuesto: m.sinPresupuesto,
+  };
 }
 
 function opcionesRegistro(miembro: { id: string; nombre: string }, credencialesExcluir: { id: string; transports: string | null }[]) {

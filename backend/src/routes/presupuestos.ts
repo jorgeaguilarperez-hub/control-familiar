@@ -24,6 +24,12 @@ export default async function presupuestosRoutes(app: FastifyInstance) {
       if (miembro.rol === 'admin') {
         return reply.code(400).send({ error: 'El administrador no tiene presupuesto asignado' });
       }
+      // Un miembro normal puede quedar marcado a mano como "sin
+      // presupuesto" (ver editarMiembro) -- mientras esté así, tampoco se le
+      // puede asignar uno desde aquí.
+      if (miembro.sinPresupuesto) {
+        return reply.code(400).send({ error: 'Este miembro está marcado como "sin presupuesto"' });
+      }
       const periodo = req.body.periodo || periodoActual();
       return asignarPresupuesto(miembroId, periodo, monto);
     }

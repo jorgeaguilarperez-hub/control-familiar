@@ -627,23 +627,44 @@ export function Admin() {
                 {m.rol === 'admin' ? (
                   <p className="text-xs text-[color:var(--text-dim)] w-32">— (el administrador no tiene presupuesto)</p>
                 ) : (
-                <input
-                  type="number"
-                  min="0"
-                  placeholder={`$ para ${m.nombre.split(' ')[0]}`}
-                  defaultValue={presupuestos[m.id] ?? ''}
-                  onBlur={async (e) => {
-                    const monto = Number(e.target.value);
-                    if (!monto) return;
-                    try {
-                      await asignarPresupuesto(m.id, periodo, monto);
-                      await cargar();
-                    } catch (err) {
-                      setError(mensajeDeError(err));
-                    }
-                  }}
-                  className="w-32 rounded-lg bg-[color:var(--surface-2)] border border-[color:var(--border)] px-2 py-1.5 text-xs"
-                />
+                  <div className="space-y-1 w-32">
+                    <label className="flex items-center gap-1.5 text-[10px] text-[color:var(--text-dim)]">
+                      <input
+                        type="checkbox"
+                        checked={m.sinPresupuesto}
+                        onChange={async (e) => {
+                          try {
+                            await editarMiembro(m.id, { sinPresupuesto: e.target.checked });
+                            await cargar();
+                          } catch (err) {
+                            setError(mensajeDeError(err));
+                          }
+                        }}
+                      />
+                      Sin presupuesto
+                    </label>
+                    {m.sinPresupuesto ? (
+                      <p className="text-xs text-[color:var(--text-dim)]">— (no entra en gráficas ni reportes)</p>
+                    ) : (
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder={`$ para ${m.nombre.split(' ')[0]}`}
+                        defaultValue={presupuestos[m.id] ?? ''}
+                        onBlur={async (e) => {
+                          const monto = Number(e.target.value);
+                          if (!monto) return;
+                          try {
+                            await asignarPresupuesto(m.id, periodo, monto);
+                            await cargar();
+                          } catch (err) {
+                            setError(mensajeDeError(err));
+                          }
+                        }}
+                        className="w-32 rounded-lg bg-[color:var(--surface-2)] border border-[color:var(--border)] px-2 py-1.5 text-xs"
+                      />
+                    )}
+                  </div>
                 )}
               </div>
 

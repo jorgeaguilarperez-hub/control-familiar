@@ -9,8 +9,10 @@ export default async function reportesRoutes(app: FastifyInstance) {
 
     // El administrador no participa en presupuestos ni gastos (es un rol
     // solo para administrar el sistema), así que no aparece en este
-    // desglose por persona.
-    const miembros = listarMiembros().filter((m) => m.activo && m.rol !== 'admin');
+    // desglose por persona. Lo mismo un miembro marcado a mano como "sin
+    // presupuesto": ninguno de los dos entra a este desglose ni a las
+    // gráficas que se arman con él.
+    const miembros = listarMiembros().filter((m) => m.activo && m.rol !== 'admin' && !m.sinPresupuesto);
     const presupuestos = listarPresupuestosDePeriodo(periodo);
     const gastos = gastadoPorMiembro(periodo);
 

@@ -158,6 +158,57 @@ async function main() {
     'el resumen de reportes por miembro no incluye al administrador (no participa en presupuesto ni gastos)'
   );
 
+  // --- Un miembro normal (no admin) puede marcarse a mano como "sin
+  // presupuesto": a diferencia del admin, sí puede seguir registrando
+  // gastos, solo que no participa del desglose de presupuesto/gráficas.
+  const miembroSinPresupuesto = crearMiembro({ nombre: 'Miembro sin presupuesto', casaIds: [casa.id], rol: 'miembro' });
+  asignarPresupuesto(miembroSinPresupuesto.id, '2026-09', 900);
+  ok(
+    presupuestoDeMiembro(miembroSinPresupuesto.id, '2026-09')?.monto === 900,
+    'antes de marcarlo "sin presupuesto", sí tenía uno asignado'
+  );
+
+  editarMiembro(miembroSinPresupuesto.id, { sinPresupuesto: true });
+  ok(buscarMiembroPorId(miembroSinPresupuesto.id)?.sinPresupuesto === true, 'editarMiembro marca la bandera sin_presupuesto');
+  ok(
+    presupuestoDeMiembro(miembroSinPresupuesto.id, '2026-09') === undefined,
+    'al marcarlo "sin presupuesto", se le limpia el presupuesto que ya tenía asignado'
+  );
+
+  const cookieSinPresupuesto = cookieDeSesion({ id: miembroSinPresupuesto.id, nombre: miembroSinPresupuesto.nombre, rol: 'miembro' });
+  const presupuestoParaSinPresupuesto = await app.inject({
+    method: 'PUT',
+    url: '/api/presupuestos',
+    headers: { cookie: cookieAdminParaGastos },
+    payload: { miembroId: miembroSinPresupuesto.id, periodo: '2026-09', monto: 500 },
+  });
+  ok(presupuestoParaSinPresupuesto.statusCode === 400, 'no se le puede asignar presupuesto a un miembro marcado "sin presupuesto"');
+
+  const gastoDeSinPresupuesto = await app.inject({
+    method: 'POST',
+    url: '/api/gastos',
+    headers: { cookie: cookieSinPresupuesto },
+    payload: { casaId: casa.id, categoriaId: categoria.id, monto: 50, fecha: '2026-09-05' },
+  });
+  ok(gastoDeSinPresupuesto.statusCode === 200, 'a diferencia del admin, un miembro "sin presupuesto" sí puede registrar sus gastos');
+
+  const resumenConSinPresupuesto = await app.inject({
+    method: 'GET',
+    url: '/api/reportes/resumen?periodo=2026-09',
+    headers: { cookie: cookieAdminParaGastos },
+  });
+  ok(
+    !resumenConSinPresupuesto.json().porMiembro.some((m: any) => m.miembroId === miembroSinPresupuesto.id),
+    'el resumen de reportes por miembro no incluye a quien está marcado "sin presupuesto"'
+  );
+
+  editarMiembro(miembroSinPresupuesto.id, { sinPresupuesto: false });
+  ok(
+    buscarMiembroPorId(miembroSinPresupuesto.id)?.sinPresupuesto === false,
+    'se le puede quitar la bandera "sin presupuesto" para volver a llevarle su presupuesto'
+  );
+  eliminarMiembro(miembroSinPresupuesto.id);
+
   // --- Renombrar casas y categorías.
   editarCasa(casa.id, { nombre: 'Casa Centro (renombrada)' });
   ok(listarCasas().find((c) => c.id === casa.id)?.nombre === 'Casa Centro (renombrada)', 'renombrar una casa cambia su nombre');
