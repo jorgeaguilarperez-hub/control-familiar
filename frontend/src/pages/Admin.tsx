@@ -374,6 +374,73 @@ function EnlaceInvitacion({ link, onCerrar }: { link: string; onCerrar: () => vo
   );
 }
 
+// Campo de presupuesto de un miembro, con un botón "Guardar" explícito --
+// antes se guardaba solo al salir del campo (onBlur), lo que era fácil de
+// confundir con "no se guardó nada" si la persona no notaba el cambio.
+function CampoPresupuesto({
+  nombre,
+  monto,
+  onGuardar,
+}: {
+  nombre: string;
+  monto: number | undefined;
+  onGuardar: (monto: number) => Promise<void>;
+}) {
+  const [valor, setValor] = useState(monto !== undefined ? String(monto) : '');
+  const [guardando, setGuardando] = useState(false);
+  const [guardado, setGuardado] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setValor(monto !== undefined ? String(monto) : '');
+  }, [monto]);
+
+  async function guardar() {
+    const nuevoMonto = Number(valor);
+    if (!valor.trim() || Number.isNaN(nuevoMonto) || nuevoMonto < 0) {
+      setError('Monto inválido');
+      return;
+    }
+    setGuardando(true);
+    setError('');
+    try {
+      await onGuardar(nuevoMonto);
+      setGuardado(true);
+      setTimeout(() => setGuardado(false), 1500);
+    } catch (err) {
+      setError(mensajeDeError(err));
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="number"
+          min="0"
+          placeholder={`$ para ${nombre.split(' ')[0]}`}
+          value={valor}
+          onChange={(e) => setValor(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') guardar();
+          }}
+          className="w-24 rounded-lg bg-[color:var(--surface-2)] border border-[color:var(--border)] px-2 py-1.5 text-xs"
+        />
+        <button
+          onClick={guardar}
+          disabled={guardando}
+          className="btn-primary rounded-lg px-2 py-1.5 text-xs flex-shrink-0"
+        >
+          {guardando ? 'Guardando…' : guardado ? 'Guardado ✓' : 'Guardar'}
+        </button>
+      </div>
+      {error && <p className="text-[10px] text-[color:var(--bad)] mt-1">{error}</p>}
+    </div>
+  );
+}
+
 export function Admin() {
   const { miembro: yo, salir } = useAuth();
   const periodo = periodoActualISO();
@@ -627,7 +694,7 @@ export function Admin() {
                 {m.rol === 'admin' ? (
                   <p className="text-xs text-[color:var(--text-dim)] w-32">— (el administrador no tiene presupuesto)</p>
                 ) : (
-                  <div className="space-y-1 w-32">
+                  <div className="space-y-1">
                     <label className="flex items-center gap-1.5 text-[10px] text-[color:var(--text-dim)]">
                       <input
                         type="checkbox"
@@ -646,22 +713,13 @@ export function Admin() {
                     {m.sinPresupuesto ? (
                       <p className="text-xs text-[color:var(--text-dim)]">— (no entra en gráficas ni reportes)</p>
                     ) : (
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder={`$ para ${m.nombre.split(' ')[0]}`}
-                        defaultValue={presupuestos[m.id] ?? ''}
-                        onBlur={async (e) => {
-                          const monto = Number(e.target.value);
-                          if (!monto) return;
-                          try {
-                            await asignarPresupuesto(m.id, periodo, monto);
-                            await cargar();
-                          } catch (err) {
-                            setError(mensajeDeError(err));
-                          }
+                      <CampoPresupuesto
+                        nombre={m.nombre}
+                        monto={presupuestos[m.id]}
+                        onGuardar={async (monto) => {
+                          await asignarPresupuesto(m.id, periodo, monto);
+                          await cargar();
                         }}
-                        className="w-32 rounded-lg bg-[color:var(--surface-2)] border border-[color:var(--border)] px-2 py-1.5 text-xs"
                       />
                     )}
                   </div>
