@@ -503,6 +503,25 @@ async function main() {
     'con la familia vacía, se puede volver a fundar el sistema con un nuevo administrador'
   );
 
+  // --- Las opciones de registro/login deben pedirle al navegador que
+  // prefiera el propio dispositivo (Face ID/huella) en vez de ofrecer
+  // primero "usar otro dispositivo" con un código QR.
+  const opcionesBootstrap = bootstrapDeNuevo.json().options;
+  ok(
+    opcionesBootstrap.authenticatorSelection?.authenticatorAttachment === 'platform',
+    'las opciones de registro piden un autenticador de plataforma (Face ID/huella), no uno externo'
+  );
+  ok(
+    Array.isArray(opcionesBootstrap.hints) && opcionesBootstrap.hints.includes('client-device'),
+    'las opciones de registro incluyen el "hint" de preferir el propio dispositivo'
+  );
+
+  const opcionesLogin = (await app.inject({ method: 'POST', url: '/api/auth/login/opciones' })).json().options;
+  ok(
+    Array.isArray(opcionesLogin.hints) && opcionesLogin.hints.includes('client-device'),
+    'las opciones de login también incluyen el "hint" de preferir el propio dispositivo'
+  );
+
   await app.close();
   fs.rmSync(dbTemporal, { force: true });
 

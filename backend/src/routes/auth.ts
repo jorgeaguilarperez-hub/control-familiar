@@ -54,11 +54,16 @@ function opcionesRegistro(miembro: { id: string; nombre: string }, credencialesE
     authenticatorSelection: {
       residentKey: 'required',
       userVerification: 'preferred',
-      // Sin esto, algunos navegadores ofrecen primero "usar otro
+      // authenticatorAttachment: 'platform' por sí solo no bastaba: algunos
+      // navegadores (sobre todo Chrome) igual ofrecían primero "usar otro
       // dispositivo" con un código QR en vez de Face ID / huella del propio
-      // teléfono.
+      // teléfono. "localDevice" además manda el "hint" nuevo del estándar
+      // (hints: ['client-device']), que si lo entiende el navegador le dice
+      // desde antes de armar su pantalla "usa este mismo dispositivo" -- ya
+      // ni se le ocurre ofrecer el QR como primera opción.
       authenticatorAttachment: 'platform',
     },
+    preferredAuthenticatorType: 'localDevice',
   });
 }
 
@@ -206,6 +211,12 @@ export default async function authRoutes(app: FastifyInstance) {
 
   app.post('/api/auth/login/opciones', async () => {
     const options = await generateAuthenticationOptions({ rpID: RP_ID, userVerification: 'preferred' });
+    // generateAuthenticationOptions (a diferencia de la de registro) todavía
+    // no trae un atajo para esto, pero el campo "hints" del estándar
+    // también aplica aquí -- se agrega a mano para la misma razón: que el
+    // navegador prefiera el propio dispositivo en vez de ofrecer primero
+    // "usar otro dispositivo" con un código QR.
+    (options as { hints?: string[] }).hints = ['client-device'];
     const requestId = crypto.randomUUID();
     guardarChallenge(requestId, options.challenge);
     return { options, requestId };
