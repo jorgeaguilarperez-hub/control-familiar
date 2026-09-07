@@ -15,6 +15,14 @@ const dbPath = process.env.DATABASE_FILE || path.join(dataDir, 'controlfamiliar.
 export const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA foreign_keys = ON;');
 
+// Se anota si miembro_casas ya existía ANTES de crearla más abajo -- así se
+// sabe si esta es la primera vez que corre esta versión (y por lo tanto hay
+// que migrar la vieja asignación de una sola casa por miembro hacia la
+// tabla nueva) o si ya se había hecho esa migración antes.
+const miembroCasasExistiaAntes = Boolean(
+  db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'miembro_casas'").get()
+);
+
 // Los borrados "de verdad" (casa/categoría/miembro) hacen varios DELETE en
 // cascada a mano -- sin esto, si uno de esos DELETE fallara a la mitad
 // (por ejemplo un candado inesperado de SQLite), podría quedar el borrado
@@ -92,6 +100,16 @@ db.exec(`
     creado_en TEXT NOT NULL DEFAULT (datetime('now')),
     actualizado_en TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Un miembro puede tener asignada una casa, varias, o (con
+  -- miembros.todas_las_casas) todas -- reemplaza el viejo campo
+  -- miembros.casa_id de una sola casa, que se deja tal cual (sin usarse) en
+  -- vez de borrarlo.
+  CREATE TABLE IF NOT EXISTS miembro_casas (
+    miembro_id TEXT NOT NULL REFERENCES miembros(id),
+    casa_id TEXT NOT NULL REFERENCES casas(id),
+    PRIMARY KEY (miembro_id, casa_id)
+  );
 `);
 
 // Migraciones aditivas: si el archivo de datos ya existía de antes de que
@@ -108,6 +126,19 @@ if (!columnasCategorias.some((c) => c.name === 'activo')) {
 const columnasMiembros = db.prepare('PRAGMA table_info(miembros)').all() as { name: string }[];
 if (!columnasMiembros.some((c) => c.name === 'ultima_interaccion')) {
   db.exec('ALTER TABLE miembros ADD COLUMN ultima_interaccion TEXT');
+}
+if (!columnasMiembros.some((c) => c.name === 'todas_las_casas')) {
+  db.exec('ALTER TABLE miembros ADD COLUMN todas_las_casas INTEGER NOT NULL DEFAULT 0');
+}
+
+// Primera vez que corre esta versión: lo que ya hubiera en el viejo
+// miembros.casa_id (una sola casa) se copia a la tabla nueva, para que
+// nadie pierda la casa que ya tenía asignada.
+if (!miembroCasasExistiaAntes) {
+  db.exec(`
+    INSERT INTO miembro_casas (miembro_id, casa_id)
+    SELECT id, casa_id FROM miembros WHERE casa_id IS NOT NULL
+  `);
 }
 
 // ---------- Casas ----------
@@ -155,6 +186,7 @@ export function casaTieneGastos(id: string): boolean {
 export function eliminarCasa(id: string) {
   conTransaccion(() => {
     db.prepare('UPDATE miembros SET casa_id = NULL WHERE casa_id = ?').run(id);
+    db.prepare('DELETE FROM miembro_casas WHERE casa_id = ?').run(id);
     db.prepare('DELETE FROM gastos WHERE casa_id = ?').run(id);
     db.prepare('DELETE FROM casas WHERE id = ?').run(id);
   });
@@ -167,13 +199,14 @@ export type Rol = 'admin' | 'miembro';
 export type Miembro = {
   id: string;
   nombre: string;
-  casaId: string | null;
+  casaIds: string[];
+  todasLasCasas: boolean;
   rol: Rol;
   activo: boolean;
 };
 
 export type MiembroConEstado = Miembro & {
-  casaNombre: string | null;
+  casaNombres: string[];
   enLinea: boolean;
   tienePasskey: boolean;
   numCredenciales: number;
@@ -181,21 +214,28 @@ export type MiembroConEstado = Miembro & {
 };
 
 const SELECT_MIEMBRO = `
-  SELECT m.id, m.nombre, m.casa_id as casaId, m.rol, m.activo,
-         c.nombre as casaNombre,
+  SELECT m.id, m.nombre, m.rol, m.activo, m.todas_las_casas as todasLasCasas,
+         (SELECT json_group_array(t.id) FROM (
+            SELECT cc.id FROM miembro_casas mc JOIN casas cc ON cc.id = mc.casa_id
+            WHERE mc.miembro_id = m.id ORDER BY cc.nombre
+          ) t) as casaIdsJson,
+         (SELECT json_group_array(t.nombre) FROM (
+            SELECT cc.nombre FROM miembro_casas mc JOIN casas cc ON cc.id = mc.casa_id
+            WHERE mc.miembro_id = m.id ORDER BY cc.nombre
+          ) t) as casaNombresJson,
          (m.ultima_actividad IS NOT NULL AND m.ultima_actividad >= datetime('now', '-3 minutes')) as enLinea,
          (SELECT COUNT(*) FROM credenciales cr WHERE cr.miembro_id = m.id) as numCredenciales,
          (SELECT COUNT(*) FROM gastos g WHERE g.miembro_id = m.id) as numGastos
   FROM miembros m
-  LEFT JOIN casas c ON c.id = m.casa_id
 `;
 
 function filaAMiembro(fila: any): MiembroConEstado {
   return {
     id: fila.id,
     nombre: fila.nombre,
-    casaId: fila.casaId,
-    casaNombre: fila.casaNombre,
+    casaIds: JSON.parse(fila.casaIdsJson || '[]'),
+    casaNombres: JSON.parse(fila.casaNombresJson || '[]'),
+    todasLasCasas: Boolean(fila.todasLasCasas),
     rol: fila.rol,
     activo: Boolean(fila.activo),
     enLinea: Boolean(fila.enLinea),
@@ -220,30 +260,56 @@ export function buscarMiembroPorId(id: string): MiembroConEstado | undefined {
   return fila ? filaAMiembro(fila) : undefined;
 }
 
-export function crearMiembro(datos: { nombre: string; casaId: string | null; rol: Rol }): MiembroConEstado {
+function reemplazarCasasDeMiembro(miembroId: string, casaIds: string[]) {
+  db.prepare('DELETE FROM miembro_casas WHERE miembro_id = ?').run(miembroId);
+  for (const casaId of casaIds) {
+    db.prepare('INSERT OR IGNORE INTO miembro_casas (miembro_id, casa_id) VALUES (?, ?)').run(miembroId, casaId);
+  }
+}
+
+export function crearMiembro(datos: { nombre: string; casaIds?: string[]; todasLasCasas?: boolean; rol: Rol }): MiembroConEstado {
   const id = randomUUID();
-  db.prepare('INSERT INTO miembros (id, nombre, casa_id, rol) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO miembros (id, nombre, rol, todas_las_casas) VALUES (?, ?, ?, ?)').run(
     id,
     datos.nombre,
-    datos.casaId,
-    datos.rol
+    datos.rol,
+    datos.todasLasCasas ? 1 : 0
   );
+  if (!datos.todasLasCasas && datos.casaIds?.length) {
+    conTransaccion(() => reemplazarCasasDeMiembro(id, datos.casaIds!));
+  }
   return buscarMiembroPorId(id)!;
 }
 
 export function editarMiembro(
   id: string,
-  datos: { nombre?: string; casaId?: string | null; rol?: Rol; activo?: boolean }
+  datos: { nombre?: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol; activo?: boolean }
 ): MiembroConEstado | undefined {
   const actual = buscarMiembroPorId(id);
   if (!actual) return undefined;
-  db.prepare('UPDATE miembros SET nombre = ?, casa_id = ?, rol = ?, activo = ? WHERE id = ?').run(
+  const todasLasCasas = datos.todasLasCasas !== undefined ? datos.todasLasCasas : actual.todasLasCasas;
+  db.prepare('UPDATE miembros SET nombre = ?, rol = ?, activo = ?, todas_las_casas = ? WHERE id = ?').run(
     datos.nombre ?? actual.nombre,
-    datos.casaId !== undefined ? datos.casaId : actual.casaId,
     datos.rol ?? actual.rol,
     datos.activo !== undefined ? (datos.activo ? 1 : 0) : (actual.activo ? 1 : 0),
+    todasLasCasas ? 1 : 0,
     id
   );
+
+  // "casaIds" y "todasLasCasas" viajan como pareja: si cualquiera de los
+  // dos llega en la petición, se reemplaza la asignación completa (nunca se
+  // combina a medias con lo que ya había).
+  if (datos.casaIds !== undefined || datos.todasLasCasas !== undefined) {
+    conTransaccion(() => reemplazarCasasDeMiembro(id, todasLasCasas ? [] : datos.casaIds ?? []));
+  }
+
+  // El administrador no participa en presupuestos (es un rol solo para
+  // administrar el sistema, no para gastar) -- al ascender a alguien se le
+  // limpia cualquier presupuesto que ya tuviera, porque deja de aplicar.
+  if (datos.rol === 'admin' && actual.rol !== 'admin') {
+    db.prepare('DELETE FROM presupuestos WHERE miembro_id = ?').run(id);
+  }
+
   return buscarMiembroPorId(id);
 }
 
@@ -265,6 +331,7 @@ export function eliminarMiembro(id: string) {
     db.prepare('DELETE FROM invitaciones WHERE miembro_id = ?').run(id);
     db.prepare('DELETE FROM presupuestos WHERE miembro_id = ?').run(id);
     db.prepare('DELETE FROM gastos WHERE miembro_id = ?').run(id);
+    db.prepare('DELETE FROM miembro_casas WHERE miembro_id = ?').run(id);
     db.prepare('DELETE FROM miembros WHERE id = ?').run(id);
   });
 }
@@ -339,11 +406,11 @@ export function eliminarCredencial(id: string) {
   db.prepare('DELETE FROM credenciales WHERE id = ?').run(id);
 }
 
-export function buscarCredencialPorId(id: string): (Credencial & { miembro: Miembro }) | undefined {
+export function buscarCredencialPorId(id: string): (Credencial & { miembro: { id: string } }) | undefined {
   const fila = db
     .prepare(
       `SELECT c.id, c.miembro_id as miembroId, c.public_key as publicKey, c.counter, c.transports, c.creado_en as creadoEn,
-              m.id as mId, m.nombre as mNombre, m.casa_id as mCasaId, m.rol as mRol, m.activo as mActivo
+              m.id as mId
        FROM credenciales c JOIN miembros m ON m.id = c.miembro_id
        WHERE c.id = ?`
     )
@@ -356,13 +423,7 @@ export function buscarCredencialPorId(id: string): (Credencial & { miembro: Miem
     counter: fila.counter,
     transports: fila.transports,
     creadoEn: fila.creadoEn,
-    miembro: {
-      id: fila.mId,
-      nombre: fila.mNombre,
-      casaId: fila.mCasaId,
-      rol: fila.mRol,
-      activo: Boolean(fila.mActivo),
-    },
+    miembro: { id: fila.mId },
   };
 }
 

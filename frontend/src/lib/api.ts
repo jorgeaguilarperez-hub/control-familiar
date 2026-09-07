@@ -58,8 +58,12 @@ export type Categoria = { id: string; nombre: string; activo: boolean; numGastos
 export type Miembro = {
   id: string;
   nombre: string;
-  casaId: string | null;
-  casaNombre: string | null;
+  // Una casa, varias, o (con todasLasCasas) todas -- ya no es una sola
+  // casa fija. Cuando todasLasCasas es true, casaIds/casaNombres vienen
+  // vacíos (no enumeran cada casa una por una).
+  casaIds: string[];
+  casaNombres: string[];
+  todasLasCasas: boolean;
   rol: Rol;
   activo: boolean;
   enLinea: boolean;
@@ -124,10 +128,12 @@ export const editarCategoria = (id: string, datos: Partial<{ nombre: string; act
 export const borrarCategoria = (id: string) => api.del<{ ok: true; teniaGastos: boolean }>(`/api/categorias/${id}`);
 
 export const listarMiembros = () => api.get<Miembro[]>('/api/miembros');
-export const crearMiembro = (datos: { nombre: string; casaId: string | null; rol?: Rol }) =>
+export const crearMiembro = (datos: { nombre: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol }) =>
   api.post<{ miembro: Miembro; invitacion: { token: string; ruta: string } }>('/api/miembros', datos);
-export const editarMiembro = (id: string, datos: Partial<{ nombre: string; casaId: string | null; rol: Rol; activo: boolean }>) =>
-  api.patch<Miembro>(`/api/miembros/${id}`, datos);
+export const editarMiembro = (
+  id: string,
+  datos: Partial<{ nombre: string; casaIds: string[]; todasLasCasas: boolean; rol: Rol; activo: boolean }>
+) => api.patch<Miembro>(`/api/miembros/${id}`, datos);
 export const borrarMiembro = (id: string) => api.del<{ ok: true; teniaGastos: boolean }>(`/api/miembros/${id}`);
 export const regenerarInvitacion = (id: string) =>
   api.post<{ invitacion: { token: string; ruta: string } }>(`/api/miembros/${id}/invitacion`);

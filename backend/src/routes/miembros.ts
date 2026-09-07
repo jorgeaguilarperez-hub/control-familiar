@@ -24,13 +24,18 @@ export default async function miembrosRoutes(app: FastifyInstance) {
   // familia (y quién está en línea ahora mismo).
   app.get('/api/miembros', { preHandler: requireAuth }, async () => listarMiembros());
 
-  app.post<{ Body: { nombre: string; casaId: string | null; rol?: Rol } }>(
+  app.post<{ Body: { nombre: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol } }>(
     '/api/miembros',
     { preHandler: requireAdmin },
     async (req, reply) => {
       const nombre = req.body?.nombre?.trim();
       if (!nombre) return reply.code(400).send({ error: 'Falta el nombre' });
-      const miembro = crearMiembro({ nombre, casaId: req.body.casaId ?? null, rol: req.body.rol === 'admin' ? 'admin' : 'miembro' });
+      const miembro = crearMiembro({
+        nombre,
+        casaIds: req.body.casaIds,
+        todasLasCasas: req.body.todasLasCasas,
+        rol: req.body.rol === 'admin' ? 'admin' : 'miembro',
+      });
       const invitacion = crearInvitacion(miembro.id);
       return { miembro, invitacion: invitacionParaCliente(invitacion.token) };
     }
@@ -47,7 +52,10 @@ export default async function miembrosRoutes(app: FastifyInstance) {
     }
   );
 
-  app.patch<{ Params: { id: string }; Body: { nombre?: string; casaId?: string | null; rol?: Rol; activo?: boolean } }>(
+  app.patch<{
+    Params: { id: string };
+    Body: { nombre?: string; casaIds?: string[]; todasLasCasas?: boolean; rol?: Rol; activo?: boolean };
+  }>(
     '/api/miembros/:id',
     { preHandler: requireAdmin },
     async (req, reply) => {

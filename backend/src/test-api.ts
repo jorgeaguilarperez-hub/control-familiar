@@ -76,8 +76,8 @@ async function main() {
   // permisos de "solo mis propios gastos".
   const casa = crearCasa('Casa Centro');
   const categoria = crearCategoria('Categoría de prueba');
-  const admin = crearMiembro({ nombre: 'Admin de prueba', casaId: null, rol: 'admin' });
-  const miembro = crearMiembro({ nombre: 'Miembro de prueba', casaId: casa.id, rol: 'miembro' });
+  const admin = crearMiembro({ nombre: 'Admin de prueba', rol: 'admin' });
+  const miembro = crearMiembro({ nombre: 'Miembro de prueba', casaIds: [casa.id], rol: 'miembro' });
 
   asignarPresupuesto(miembro.id, '2026-09', 1000);
   crearGasto({ miembroId: miembro.id, casaId: casa.id, categoriaId: categoria.id, monto: 850, fecha: '2026-09-05', nota: null });
@@ -88,6 +88,75 @@ async function main() {
 
   ok(Boolean(admin.rol === 'admin'), 'el primer miembro creado puede ser administrador');
   ok(Boolean(miembro.rol === 'miembro'), 'un miembro regular no es administrador');
+
+  // --- Un miembro puede tener asignada una casa, varias, o (con
+  // todasLasCasas) todas -- ya no es una sola casa fija por miembro.
+  const casaPlaya = crearCasa('Casa Playa');
+  const miembroVariasCasas = crearMiembro({ nombre: 'Miembro varias casas', casaIds: [casa.id, casaPlaya.id], rol: 'miembro' });
+  ok(
+    [...(buscarMiembroPorId(miembroVariasCasas.id)?.casaIds ?? [])].sort().join(',') === [casa.id, casaPlaya.id].sort().join(','),
+    'un miembro puede quedar asignado a varias casas a la vez'
+  );
+
+  const miembroTodasLasCasas = crearMiembro({ nombre: 'Miembro todas las casas', todasLasCasas: true, rol: 'miembro' });
+  ok(buscarMiembroPorId(miembroTodasLasCasas.id)?.todasLasCasas === true, 'un miembro puede quedar marcado con acceso a todas las casas');
+  ok(
+    buscarMiembroPorId(miembroTodasLasCasas.id)?.casaIds.length === 0,
+    '"todas las casas" no enumera cada casa una por una, solo marca la bandera'
+  );
+
+  editarMiembro(miembroVariasCasas.id, { casaIds: [casaPlaya.id] });
+  ok(
+    buscarMiembroPorId(miembroVariasCasas.id)?.casaIds.join(',') === casaPlaya.id,
+    'reasignar las casas de un miembro reemplaza la lista anterior, no la combina'
+  );
+
+  eliminarMiembro(miembroVariasCasas.id);
+  eliminarMiembro(miembroTodasLasCasas.id);
+  eliminarCasa(casaPlaya.id);
+
+  // --- El administrador es un rol solo para administrar el sistema: no
+  // tiene presupuesto propio ni registra gastos.
+  const cookieAdminParaGastos = cookieDeSesion(admin);
+
+  const presupuestoParaAdmin = await app.inject({
+    method: 'PUT',
+    url: '/api/presupuestos',
+    headers: { cookie: cookieAdminParaGastos },
+    payload: { miembroId: admin.id, periodo: '2026-09', monto: 500 },
+  });
+  ok(presupuestoParaAdmin.statusCode === 400, 'no se le puede asignar presupuesto a un administrador');
+  ok(presupuestoDeMiembro(admin.id, '2026-09') === undefined, 'de verdad no quedó ningún presupuesto guardado para el admin');
+
+  const gastoDeAdmin = await app.inject({
+    method: 'POST',
+    url: '/api/gastos',
+    headers: { cookie: cookieAdminParaGastos },
+    payload: { casaId: casa.id, categoriaId: categoria.id, monto: 100, fecha: '2026-09-05' },
+  });
+  ok(gastoDeAdmin.statusCode === 403, 'el administrador no puede registrar un gasto propio');
+
+  // Ascender a alguien a admin le limpia cualquier presupuesto que ya
+  // tuviera (ya no aplica al dejar de ser un miembro "de a pie").
+  const futuroAdmin = crearMiembro({ nombre: 'Futuro admin', casaIds: [casa.id], rol: 'miembro' });
+  asignarPresupuesto(futuroAdmin.id, '2026-09', 700);
+  ok(presupuestoDeMiembro(futuroAdmin.id, '2026-09')?.monto === 700, 'antes de ascenderlo, sí tenía presupuesto asignado');
+  editarMiembro(futuroAdmin.id, { rol: 'admin' });
+  ok(
+    presupuestoDeMiembro(futuroAdmin.id, '2026-09') === undefined,
+    'al ascender a alguien a administrador, se le limpia el presupuesto que ya tenía'
+  );
+  eliminarMiembro(futuroAdmin.id);
+
+  const resumenConAdmin = await app.inject({
+    method: 'GET',
+    url: '/api/reportes/resumen?periodo=2026-09',
+    headers: { cookie: cookieAdminParaGastos },
+  });
+  ok(
+    !resumenConAdmin.json().porMiembro.some((m: any) => m.miembroId === admin.id),
+    'el resumen de reportes por miembro no incluye al administrador (no participa en presupuesto ni gastos)'
+  );
 
   // --- Renombrar casas y categorías.
   editarCasa(casa.id, { nombre: 'Casa Centro (renombrada)' });
@@ -104,7 +173,7 @@ async function main() {
   // afectar al miembro/gasto de prueba de arriba.
   const casaBorrable = crearCasa('Casa a borrar');
   const categoriaBorrable = crearCategoria('Categoría a borrar');
-  const miembroEnCasaBorrable = crearMiembro({ nombre: 'Miembro en casa a borrar', casaId: casaBorrable.id, rol: 'miembro' });
+  const miembroEnCasaBorrable = crearMiembro({ nombre: 'Miembro en casa a borrar', casaIds: [casaBorrable.id], rol: 'miembro' });
   const gastoBorrable = crearGasto({
     miembroId: miembroEnCasaBorrable.id,
     casaId: casaBorrable.id,
@@ -124,7 +193,7 @@ async function main() {
   ok(listarCasas().find((c) => c.id === casaBorrable.id) === undefined, 'borrar una casa la quita de la lista');
   ok(listarGastos().find((g) => g.id === gastoBorrable.id) === undefined, 'borrar una casa borra también sus gastos');
   ok(
-    buscarMiembroPorId(miembroEnCasaBorrable.id)?.casaId === null,
+    buscarMiembroPorId(miembroEnCasaBorrable.id)?.casaIds.length === 0,
     'borrar una casa deja "sin casa" a quien la tenía asignada, sin dejar una referencia rota'
   );
 
@@ -154,7 +223,7 @@ async function main() {
   // al miembro completo) -- para cuando alguien perdió o cambió de
   // dispositivo. Se usa un miembro nuevo, dedicado, para no interferir con
   // el resto de las pruebas.
-  const miembroConPasskeys = crearMiembro({ nombre: 'Miembro con dos passkeys', casaId: null, rol: 'miembro' });
+  const miembroConPasskeys = crearMiembro({ nombre: 'Miembro con dos passkeys', rol: 'miembro' });
   crearCredencial({
     id: 'cred-1',
     miembroId: miembroConPasskeys.id,
@@ -206,7 +275,7 @@ async function main() {
   // "admin": se crea otro admin, se desactiva a "admin" un momento (para que
   // el nuevo quede como único activo), se prueba el candado, y se restaura
   // todo antes de seguir.
-  const otroAdmin = crearMiembro({ nombre: 'Segundo admin de prueba', casaId: null, rol: 'admin' });
+  const otroAdmin = crearMiembro({ nombre: 'Segundo admin de prueba', rol: 'admin' });
   crearCredencial({
     id: 'cred-otro-admin',
     miembroId: otroAdmin.id,
@@ -257,7 +326,7 @@ async function main() {
   // rechazar aunque la cookie siga siendo válida por dentro. Se prueba
   // retrocediendo el reloj a mano (vía SQL directo), sin esperar 30
   // segundos de verdad.
-  const miembroInactividad = crearMiembro({ nombre: 'Miembro para probar inactividad', casaId: null, rol: 'miembro' });
+  const miembroInactividad = crearMiembro({ nombre: 'Miembro para probar inactividad', rol: 'miembro' });
   const cookieInactividad = cookieDeSesion(miembroInactividad);
 
   const antesDeExpirar = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie: cookieInactividad } });
@@ -348,7 +417,7 @@ async function main() {
   });
   ok(borrarUnicoAdmin.statusCode === 409, 'la ruta DELETE /api/miembros también impide borrar al único administrador');
 
-  const segundoAdmin = crearMiembro({ nombre: 'Segundo admin de prueba', casaId: null, rol: 'admin' });
+  const segundoAdmin = crearMiembro({ nombre: 'Segundo admin de prueba', rol: 'admin' });
   const borrarConOtroAdminDisponible = await app.inject({
     method: 'DELETE',
     url: `/api/miembros/${admin.id}`,

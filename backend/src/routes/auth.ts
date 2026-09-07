@@ -30,7 +30,7 @@ const RP_NAME = process.env.RP_NAME || 'Control Familiar';
 const ORIGINS = (process.env.ORIGIN || 'http://localhost:5173').split(',').map((o) => o.trim());
 
 function miembroParaCliente(m: MiembroConEstado) {
-  return { id: m.id, nombre: m.nombre, casaId: m.casaId, casaNombre: m.casaNombre, rol: m.rol };
+  return { id: m.id, nombre: m.nombre, casaIds: m.casaIds, todasLasCasas: m.todasLasCasas, rol: m.rol };
 }
 
 function opcionesRegistro(miembro: { id: string; nombre: string }, credencialesExcluir: { id: string; transports: string | null }[]) {
@@ -96,7 +96,7 @@ export default async function authRoutes(app: FastifyInstance) {
       const nombre = req.body?.nombre?.trim();
       if (!nombre) return reply.code(400).send({ error: 'Falta el nombre' });
 
-      const miembro = crearMiembro({ nombre, casaId: null, rol: 'admin' });
+      const miembro = crearMiembro({ nombre, rol: 'admin' });
       const options = await opcionesRegistro(miembro, []);
       guardarChallenge(miembro.id, options.challenge);
       return { options, miembroId: miembro.id };
@@ -138,7 +138,12 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!invitacion) return reply.code(404).send({ error: 'El enlace ya no es válido o expiró' });
     const miembro = buscarMiembroPorId(invitacion.miembroId);
     if (!miembro) return reply.code(404).send({ error: 'El enlace ya no es válido' });
-    return { nombre: miembro.nombre, casaNombre: miembro.casaNombre };
+    const casaNombre = miembro.todasLasCasas
+      ? 'Todas las casas'
+      : miembro.casaNombres.length
+        ? miembro.casaNombres.join(', ')
+        : null;
+    return { nombre: miembro.nombre, casaNombre };
   });
 
   app.post<{ Params: { token: string } }>(

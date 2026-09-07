@@ -46,7 +46,7 @@ export function Familia() {
                   )}
                 </div>
                 <div className="text-xs text-[color:var(--text-dim)] truncate">
-                  {m.casaNombre ?? 'Sin casa asignada'}
+                  {m.todasLasCasas ? 'Todas las casas' : m.casaNombres.length > 0 ? m.casaNombres.join(', ') : 'Sin casa asignada'}
                   {!m.tienePasskey && ' · aún no registra su passkey'}
                 </div>
               </div>

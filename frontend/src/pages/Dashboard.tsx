@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   listarCasas,
   listarCategorias,
@@ -50,6 +51,36 @@ export function Dashboard() {
 
   if (!cargado) return <p className="text-[color:var(--text-dim)]">Cargando…</p>;
 
+  // El administrador es un rol solo para administrar el sistema: no tiene
+  // presupuesto propio ni registra gastos, así que este panel (que es
+  // justo eso) no le aplica -- se le manda a lo que sí puede hacer.
+  if (miembro?.rol === 'admin') {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="heading text-xl font-semibold mb-1">Hola, {miembro?.nombre?.split(' ')[0]}</h1>
+          <p className="text-sm text-[color:var(--text-dim)]">
+            Como administrador no tienes presupuesto ni gastos propios -- ese panel es para los demás miembros de la
+            familia.
+          </p>
+        </div>
+        <div className="glass rounded-2xl p-6 space-y-2">
+          <p className="text-sm text-[color:var(--text-dim)]">
+            Desde aquí administras casas, categorías, miembros y sus presupuestos.
+          </p>
+          <div className="flex gap-3 pt-1">
+            <Link to="/admin" className="btn-primary rounded-xl px-4 py-2 text-sm">
+              Ir a Admin
+            </Link>
+            <Link to="/reportes" className="rounded-xl px-4 py-2 text-sm border border-[color:var(--border)] text-[color:var(--text-dim)]">
+              Ver reportes
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (casas.length === 0 || categorias.length === 0) {
     return (
       <div className="glass rounded-2xl p-6 text-center">
@@ -78,7 +109,7 @@ export function Dashboard() {
         <GastoForm
           casas={casas}
           categorias={categorias}
-          casaInicial={miembro?.casaId || undefined}
+          casaInicial={miembro?.casaIds?.[0]}
           gastoAEditar={editando || undefined}
           onCancelar={editando ? () => setEditando(null) : undefined}
           onNuevaCategoria={async (nombre) => {

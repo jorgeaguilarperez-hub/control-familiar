@@ -219,6 +219,49 @@ function NombreMiembro({ miembro, onRenombrar }: { miembro: Miembro; onRenombrar
   );
 }
 
+// Un miembro puede quedar asignado a una casa, varias, o -- con la casilla
+// "Todas las casas" -- a todas (incluidas las que se creen después). Se
+// reutiliza tanto para dar de alta como para reasignar a alguien que ya
+// existe.
+function SelectorCasas({
+  casas,
+  casaIds,
+  todasLasCasas,
+  onCambiar,
+}: {
+  casas: Casa[];
+  casaIds: string[];
+  todasLasCasas: boolean;
+  onCambiar: (casaIds: string[], todasLasCasas: boolean) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-1.5 text-xs text-[color:var(--text-dim)]">
+        <input type="checkbox" checked={todasLasCasas} onChange={(e) => onCambiar(casaIds, e.target.checked)} />
+        Todas las casas
+      </label>
+      {!todasLasCasas && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {casas.length === 0 && <span className="text-xs text-[color:var(--text-dim)]">Todavía no hay casas.</span>}
+          {casas.map((c) => (
+            <label key={c.id} className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={casaIds.includes(c.id)}
+                onChange={(e) => {
+                  const nuevos = e.target.checked ? [...casaIds, c.id] : casaIds.filter((id) => id !== c.id);
+                  onCambiar(nuevos, false);
+                }}
+              />
+              {c.nombre}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function etiquetaTransporte(transports: string | null): string {
   try {
     const lista: string[] = transports ? JSON.parse(transports) : [];
@@ -342,7 +385,8 @@ export function Admin() {
   const [enlacePendiente, setEnlacePendiente] = useState<{ miembroId: string; link: string } | null>(null);
 
   const [nombreMiembro, setNombreMiembro] = useState('');
-  const [casaMiembro, setCasaMiembro] = useState('');
+  const [casaIdsMiembro, setCasaIdsMiembro] = useState<string[]>([]);
+  const [todasLasCasasMiembro, setTodasLasCasasMiembro] = useState(false);
   const [borrandoMiembroId, setBorrandoMiembroId] = useState<string | null>(null);
 
   async function cargar() {
@@ -351,7 +395,6 @@ export function Admin() {
     setCategorias(cat);
     setMiembros(m);
     setPresupuestos(Object.fromEntries(p.map((x) => [x.miembroId, x.monto])));
-    if (!casaMiembro && c.length > 0) setCasaMiembro(c[0].id);
   }
 
   useEffect(() => {
@@ -363,8 +406,14 @@ export function Admin() {
     e.preventDefault();
     if (!nombreMiembro.trim()) return;
     try {
-      const { miembro, invitacion } = await crearMiembro({ nombre: nombreMiembro.trim(), casaId: casaMiembro || null });
+      const { miembro, invitacion } = await crearMiembro({
+        nombre: nombreMiembro.trim(),
+        casaIds: casaIdsMiembro,
+        todasLasCasas: todasLasCasasMiembro,
+      });
       setNombreMiembro('');
+      setCasaIdsMiembro([]);
+      setTodasLasCasasMiembro(false);
       await cargar();
       setEnlacePendiente({ miembroId: miembro.id, link: `${window.location.origin}${invitacion.ruta}` });
     } catch (err) {
@@ -477,25 +526,24 @@ export function Admin() {
 
       <section className="glass rounded-2xl p-5 space-y-4">
         <h2 className="heading text-base font-semibold">Dar de alta a un miembro</h2>
-        <form onSubmit={altaMiembro} className="flex flex-col sm:flex-row gap-2">
+        <form onSubmit={altaMiembro} className="flex flex-col sm:flex-row sm:items-start gap-2">
           <input
             value={nombreMiembro}
             onChange={(e) => setNombreMiembro(e.target.value)}
             placeholder="Nombre"
             className="flex-1 rounded-xl bg-[color:var(--surface-2)] border border-[color:var(--border)] px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
           />
-          <select
-            value={casaMiembro}
-            onChange={(e) => setCasaMiembro(e.target.value)}
-            className="rounded-xl bg-[color:var(--surface-2)] border border-[color:var(--border)] px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-          >
-            <option value="">Sin casa</option>
-            {casas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre}
-              </option>
-            ))}
-          </select>
+          <div className="rounded-xl border border-[color:var(--border)] px-3 py-2">
+            <SelectorCasas
+              casas={casas}
+              casaIds={casaIdsMiembro}
+              todasLasCasas={todasLasCasasMiembro}
+              onCambiar={(ids, todas) => {
+                setCasaIdsMiembro(ids);
+                setTodasLasCasasMiembro(todas);
+              }}
+            />
+          </div>
           <button className="btn-primary rounded-xl px-4 py-2 text-sm">Dar de alta</button>
         </form>
         {enlacePendiente && (
@@ -525,7 +573,8 @@ export function Admin() {
                   }}
                 />
                 <div className="text-xs text-[color:var(--text-dim)]">
-                  {m.casaNombre ?? 'Sin casa'} · {m.rol === 'admin' ? 'Administrador' : 'Miembro'}
+                  {m.todasLasCasas ? 'Todas las casas' : m.casaNombres.length > 0 ? m.casaNombres.join(', ') : 'Sin casa'} ·{' '}
+                  {m.rol === 'admin' ? 'Administrador' : 'Miembro'}
                   {m.numGastos > 0 && ` · ${m.numGastos} gasto${m.numGastos === 1 ? '' : 's'}`}
                 </div>
                 <div className="mt-1">
@@ -555,34 +604,29 @@ export function Admin() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wide text-[color:var(--text-dim)] mb-0.5">
-                  Casa donde vive
-                </label>
-                <select
-                  value={m.casaId ?? ''}
-                  onChange={async (e) => {
+                <label className="block text-[10px] uppercase tracking-wide text-[color:var(--text-dim)] mb-0.5">Casas</label>
+                <SelectorCasas
+                  casas={casas}
+                  casaIds={m.casaIds}
+                  todasLasCasas={m.todasLasCasas}
+                  onCambiar={async (casaIds, todasLasCasas) => {
                     try {
-                      await editarMiembro(m.id, { casaId: e.target.value || null });
+                      await editarMiembro(m.id, { casaIds, todasLasCasas });
                       await cargar();
                     } catch (err) {
                       setError(mensajeDeError(err));
                     }
                   }}
-                  className="rounded-lg bg-[color:var(--surface-2)] border border-[color:var(--border)] px-2 py-1.5 text-xs"
-                >
-                  <option value="">Sin casa</option>
-                  {casas.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombre}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               <div>
                 <label className="block text-[10px] uppercase tracking-wide text-[color:var(--text-dim)] mb-0.5">
                   Su presupuesto mensual
                 </label>
+                {m.rol === 'admin' ? (
+                  <p className="text-xs text-[color:var(--text-dim)] w-32">— (el administrador no tiene presupuesto)</p>
+                ) : (
                 <input
                   type="number"
                   min="0"
@@ -600,6 +644,7 @@ export function Admin() {
                   }}
                   className="w-32 rounded-lg bg-[color:var(--surface-2)] border border-[color:var(--border)] px-2 py-1.5 text-xs"
                 />
+                )}
               </div>
 
               <button

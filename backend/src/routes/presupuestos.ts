@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { requireAuth, requireAdmin } from '../lib/authGuard.js';
-import { listarPresupuestosDePeriodo, asignarPresupuesto } from '../lib/db.js';
+import { listarPresupuestosDePeriodo, asignarPresupuesto, buscarMiembroPorId } from '../lib/db.js';
 import { periodoActual } from '../lib/presupuestos.js';
 
 export default async function presupuestosRoutes(app: FastifyInstance) {
@@ -16,6 +16,13 @@ export default async function presupuestosRoutes(app: FastifyInstance) {
       const { miembroId, monto } = req.body || ({} as any);
       if (!miembroId || typeof monto !== 'number' || monto < 0) {
         return reply.code(400).send({ error: 'Datos de presupuesto inválidos' });
+      }
+      const miembro = buscarMiembroPorId(miembroId);
+      if (!miembro) return reply.code(404).send({ error: 'Miembro no encontrado' });
+      // El administrador es un rol solo para administrar el sistema: no
+      // participa del presupuesto familiar.
+      if (miembro.rol === 'admin') {
+        return reply.code(400).send({ error: 'El administrador no tiene presupuesto asignado' });
       }
       const periodo = req.body.periodo || periodoActual();
       return asignarPresupuesto(miembroId, periodo, monto);

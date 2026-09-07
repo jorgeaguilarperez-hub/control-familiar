@@ -14,6 +14,11 @@ export default async function gastosRoutes(app: FastifyInstance) {
     '/api/gastos',
     { preHandler: requireAuth },
     async (req, reply) => {
+      // El administrador es un rol solo para administrar el sistema: no
+      // registra gastos propios (para eso está cualquier miembro regular).
+      if (req.miembro!.rol === 'admin') {
+        return reply.code(403).send({ error: 'El administrador no registra gastos' });
+      }
       const { casaId, categoriaId, monto, fecha } = req.body || ({} as any);
       if (!casaId || !categoriaId || typeof monto !== 'number' || monto <= 0 || !fecha) {
         return reply.code(400).send({ error: 'Revisa casa, categoría, monto y fecha' });
@@ -35,6 +40,9 @@ export default async function gastosRoutes(app: FastifyInstance) {
     Params: { id: string };
     Body: { casaId: string; categoriaId: string; monto: number; fecha: string; nota?: string };
   }>('/api/gastos/:id', { preHandler: requireAuth }, async (req, reply) => {
+    if (req.miembro!.rol === 'admin') {
+      return reply.code(403).send({ error: 'El administrador no tiene funciones de gastos' });
+    }
     const gasto = buscarGastoPorId(req.params.id);
     if (!gasto) return reply.code(404).send({ error: 'Gasto no encontrado' });
     if (gasto.miembroId !== req.miembro!.miembroId) {
@@ -48,6 +56,9 @@ export default async function gastosRoutes(app: FastifyInstance) {
   });
 
   app.delete<{ Params: { id: string } }>('/api/gastos/:id', { preHandler: requireAuth }, async (req, reply) => {
+    if (req.miembro!.rol === 'admin') {
+      return reply.code(403).send({ error: 'El administrador no tiene funciones de gastos' });
+    }
     const gasto = buscarGastoPorId(req.params.id);
     if (!gasto) return reply.code(404).send({ error: 'Gasto no encontrado' });
     if (gasto.miembroId !== req.miembro!.miembroId) {
