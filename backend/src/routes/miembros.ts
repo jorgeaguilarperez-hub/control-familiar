@@ -10,13 +10,44 @@ import {
   crearInvitacion,
   credencialesDeMiembro,
   eliminarCredencial,
+  listarCasas,
   type Rol,
 } from '../lib/db.js';
+import { bitacora } from '../lib/bitacora.js';
 
 function invitacionParaCliente(token: string) {
   // El frontend arma la URL completa (conoce su propio origen); aquí solo
   // se regresa el token y la ruta relativa donde se consume.
   return { token, ruta: `/invitacion/${token}` };
+}
+
+// Arma una descripción legible de qué cambió en un PATCH -- solo lista los
+// campos que de verdad llegaron en el body (no todo el estado resultante),
+// para que la bitácora diga justo qué se tocó en esa edición en particular.
+function describirCambiosMiembro(body: {
+  nombre?: string;
+  casaIds?: string[];
+  todasLasCasas?: boolean;
+  rol?: Rol;
+  activo?: boolean;
+  sinPresupuesto?: boolean;
+}): string {
+  const partes: string[] = [];
+  if (body.nombre !== undefined) partes.push(`nombre → "${body.nombre}"`);
+  if (body.rol !== undefined) partes.push(`rol → ${body.rol === 'admin' ? 'Administrador' : 'Miembro'}`);
+  if (body.activo !== undefined) partes.push(body.activo ? 'reactivado' : 'dado de baja');
+  if (body.sinPresupuesto !== undefined) {
+    partes.push(body.sinPresupuesto ? 'marcado "sin presupuesto"' : 'ya no "sin presupuesto"');
+  }
+  if (body.todasLasCasas) {
+    partes.push('casas → todas');
+  } else if (body.casaIds !== undefined) {
+    const nombres = listarCasas()
+      .filter((c) => body.casaIds!.includes(c.id))
+      .map((c) => c.nombre);
+    partes.push(`casas → ${nombres.length ? nombres.join(', ') : 'ninguna'}`);
+  }
+  return partes.length ? partes.join('; ') : 'sin cambios';
 }
 
 export default async function miembrosRoutes(app: FastifyInstance) {
@@ -37,6 +68,13 @@ export default async function miembrosRoutes(app: FastifyInstance) {
         rol: req.body.rol === 'admin' ? 'admin' : 'miembro',
       });
       const invitacion = crearInvitacion(miembro.id);
+      bitacora(req, {
+        miembroId: req.miembro!.miembroId,
+        nombreActor: req.miembro!.nombre,
+        tipo: 'miembro_creado',
+        categoria: 'operacion',
+        descripcion: `${req.miembro!.nombre} dio de alta a ${miembro.nombre}`,
+      });
       return { miembro, invitacion: invitacionParaCliente(invitacion.token) };
     }
   );
@@ -48,6 +86,13 @@ export default async function miembrosRoutes(app: FastifyInstance) {
       const miembro = buscarMiembroPorId(req.params.id);
       if (!miembro) return reply.code(404).send({ error: 'Miembro no encontrado' });
       const invitacion = crearInvitacion(miembro.id);
+      bitacora(req, {
+        miembroId: req.miembro!.miembroId,
+        nombreActor: req.miembro!.nombre,
+        tipo: 'invitacion_generada',
+        categoria: 'operacion',
+        descripcion: `${req.miembro!.nombre} generó un enlace de invitación para ${miembro.nombre}`,
+      });
       return { invitacion: invitacionParaCliente(invitacion.token) };
     }
   );
@@ -70,6 +115,13 @@ export default async function miembrosRoutes(app: FastifyInstance) {
       }
 
       const actualizado = editarMiembro(req.params.id, req.body);
+      bitacora(req, {
+        miembroId: req.miembro!.miembroId,
+        nombreActor: req.miembro!.nombre,
+        tipo: 'miembro_editado',
+        categoria: 'operacion',
+        descripcion: `${req.miembro!.nombre} editó a ${miembro.nombre}: ${describirCambiosMiembro(req.body)}`,
+      });
       return actualizado;
     }
   );
@@ -89,6 +141,13 @@ export default async function miembrosRoutes(app: FastifyInstance) {
 
     const teniaGastos = miembro.numGastos > 0;
     eliminarMiembro(req.params.id);
+    bitacora(req, {
+      miembroId: req.miembro!.miembroId,
+      nombreActor: req.miembro!.nombre,
+      tipo: 'miembro_borrado',
+      categoria: 'operacion',
+      descripcion: `${req.miembro!.nombre} borró a ${miembro.nombre}`,
+    });
     return { ok: true, teniaGastos };
   });
 
@@ -129,6 +188,17 @@ export default async function miembrosRoutes(app: FastifyInstance) {
       }
 
       eliminarCredencial(credencial.id);
+      const nombreDueño = buscarMiembroPorId(req.params.id)?.nombre ?? 'un miembro';
+      bitacora(req, {
+        miembroId: req.miembro!.miembroId,
+        nombreActor: req.miembro!.nombre,
+        tipo: 'passkey_revocada',
+        categoria: 'acceso',
+        descripcion:
+          req.miembro!.miembroId === req.params.id
+            ? `${req.miembro!.nombre} se revocó una de sus propias passkeys`
+            : `${req.miembro!.nombre} revocó una passkey de ${nombreDueño}`,
+      });
       return { ok: true };
     }
   );

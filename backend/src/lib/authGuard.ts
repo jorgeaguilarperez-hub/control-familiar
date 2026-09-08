@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { verificarSesion, COOKIE, type SesionPayload } from './jwt.js';
 import { marcarActividad, buscarMiembroPorId, sesionSigueActiva } from './db.js';
+import { bitacora } from './bitacora.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -27,6 +28,13 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   // dentro -- se borra para que el navegador no siga reintentando con ella.
   if (!sesionSigueActiva(sesion.miembroId)) {
     reply.clearCookie(COOKIE.name, { path: '/' });
+    bitacora(req, {
+      miembroId: sesion.miembroId,
+      nombreActor: actual.nombre,
+      tipo: 'cierre_por_inactividad',
+      categoria: 'acceso',
+      descripcion: `Se cerró la sesión de ${actual.nombre} por inactividad`,
+    });
     reply.code(401).send({ error: 'Tu sesión se cerró por inactividad' });
     return;
   }

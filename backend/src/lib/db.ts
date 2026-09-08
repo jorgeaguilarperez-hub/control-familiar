@@ -110,6 +110,24 @@ db.exec(`
     casa_id TEXT NOT NULL REFERENCES casas(id),
     PRIMARY KEY (miembro_id, casa_id)
   );
+
+  -- Bitácora de accesos y de operación: quién entra (o intenta entrar sin
+  -- éxito), quién registra/agrega/revoca una passkey, y quién da de
+  -- alta/edita/borra cualquier cosa (miembros, casas, categorías, gastos,
+  -- presupuestos). A propósito SIN llave foránea a miembros: si a alguien
+  -- lo borran, sus entradas anteriores se quedan tal cual (con su nombre ya
+  -- guardado aparte en nombre_actor), en vez de desaparecer o romperse.
+  CREATE TABLE IF NOT EXISTS bitacora (
+    id TEXT PRIMARY KEY,
+    creado_en TEXT NOT NULL DEFAULT (datetime('now')),
+    miembro_id TEXT,
+    nombre_actor TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    categoria TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT
+  );
 `);
 
 // Migraciones aditivas: si el archivo de datos ya existía de antes de que
@@ -711,4 +729,157 @@ export function reportePorCategoria(periodo: string): { categoriaId: string; nom
        ORDER BY gastado DESC`
     )
     .all(periodo) as { categoriaId: string; nombre: string; gastado: number }[];
+}
+
+// ---------- Bitácora (accesos y operación) ----------
+// Solo la ve el administrador (la ruta que la expone así lo exige). No es
+// editable ni por él: la única acción posible sobre ella es verla, filtrarla
+// y -- si así lo decide -- borrar TODO el historial de un jalón (ver
+// borrarBitacora), nunca un registro suelto.
+
+export type TipoBitacora =
+  // -- accesos --
+  | 'login_exitoso'
+  | 'login_fallido'
+  | 'registro_passkey'
+  | 'passkey_agregada'
+  | 'registro_fallido'
+  | 'passkey_revocada'
+  | 'logout'
+  | 'cierre_por_inactividad'
+  // -- operación --
+  | 'miembro_creado'
+  | 'miembro_editado'
+  | 'miembro_borrado'
+  | 'invitacion_generada'
+  | 'casa_creada'
+  | 'casa_editada'
+  | 'casa_borrada'
+  | 'categoria_creada'
+  | 'categoria_editada'
+  | 'categoria_borrada'
+  | 'gasto_creado'
+  | 'gasto_editado'
+  | 'gasto_borrado'
+  | 'presupuesto_asignado'
+  | 'bitacora_borrada';
+
+export type CategoriaBitacora = 'acceso' | 'operacion';
+export type FiltroBitacora = 'todos' | 'acceso' | 'operacion';
+
+export type EntradaBitacora = {
+  id: string;
+  creadoEn: string;
+  miembroId: string | null;
+  nombreActor: string;
+  tipo: TipoBitacora;
+  categoria: CategoriaBitacora;
+  descripcion: string;
+  ip: string | null;
+  userAgent: string | null;
+};
+
+export function registrarBitacora(datos: {
+  miembroId?: string | null;
+  nombreActor: string;
+  tipo: TipoBitacora;
+  categoria: CategoriaBitacora;
+  descripcion: string;
+  ip?: string | null;
+  userAgent?: string | null;
+}) {
+  db.prepare(
+    `INSERT INTO bitacora (id, miembro_id, nombre_actor, tipo, categoria, descripcion, ip, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    randomUUID(),
+    datos.miembroId ?? null,
+    datos.nombreActor,
+    datos.tipo,
+    datos.categoria,
+    datos.descripcion,
+    datos.ip ?? null,
+    datos.userAgent ?? null
+  );
+}
+
+// Paginado por cursor (no por número de página): la bitácora solo crece con
+// el tiempo, así que en vez de "página 3 de 200" se pide "lo que sigue
+// después de este id" -- nunca se repite ni se salta una fila aunque
+// lleguen entradas nuevas mientras alguien la sigue viendo.
+export function listarBitacora(
+  opciones: { limite?: number; cursorId?: string; filtro?: FiltroBitacora; miembroId?: string } = {}
+): { entradas: EntradaBitacora[]; hayMas: boolean } {
+  const limite = Math.min(Math.max(opciones.limite ?? 40, 1), 200);
+  const condiciones: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (opciones.filtro === 'acceso' || opciones.filtro === 'operacion') {
+    condiciones.push('categoria = ?');
+    params.push(opciones.filtro);
+  }
+  if (opciones.miembroId) {
+    condiciones.push('miembro_id = ?');
+    params.push(opciones.miembroId);
+  }
+  if (opciones.cursorId) {
+    const cursor = db.prepare('SELECT creado_en, rowid FROM bitacora WHERE id = ?').get(opciones.cursorId) as
+      | { creado_en: string; rowid: number }
+      | undefined;
+    // Si el cursor ya no existe (por ejemplo, se borró todo el historial
+    // mientras alguien seguía viendo una página vieja), se responde como si
+    // ya no hubiera más en vez de tronar o regresar la lista completa.
+    if (!cursor) return { entradas: [], hayMas: false };
+    condiciones.push('(creado_en < ? OR (creado_en = ? AND rowid < ?))');
+    params.push(cursor.creado_en, cursor.creado_en, cursor.rowid);
+  }
+
+  const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
+  const filas = db
+    .prepare(
+      `SELECT id, creado_en as creadoEn, miembro_id as miembroId, nombre_actor as nombreActor,
+              tipo, categoria, descripcion, ip, user_agent as userAgent
+       FROM bitacora
+       ${where}
+       ORDER BY creado_en DESC, rowid DESC
+       LIMIT ?`
+    )
+    .all(...params, limite + 1) as EntradaBitacora[];
+
+  // Se pide uno de más (limite + 1) para saber si hay más sin un COUNT(*)
+  // aparte -- si llegó ese extra, se recorta y se avisa.
+  return { entradas: filas.slice(0, limite), hayMas: filas.length > limite };
+}
+
+// Para la alerta de "actividad sospechosa": se calcula sobre TODA la tabla,
+// no solo sobre lo que el cliente ya cargó -- así no depende de cuántas
+// páginas haya pedido ver ni de qué filtro tenga puesto.
+export function contarIpsSospechosas(horas = 24, umbral = 3): { ip: string; intentos: number }[] {
+  return db
+    .prepare(
+      `SELECT ip, COUNT(*) as intentos
+       FROM bitacora
+       WHERE tipo IN ('login_fallido', 'registro_fallido')
+         AND ip IS NOT NULL
+         AND creado_en >= datetime('now', ?)
+       GROUP BY ip
+       HAVING COUNT(*) >= ?
+       ORDER BY intentos DESC`
+    )
+    .all(`-${horas} hours`, umbral) as { ip: string; intentos: number }[];
+}
+
+export function contarBitacora(): number {
+  const fila = db.prepare('SELECT COUNT(*) as n FROM bitacora').get() as { n: number };
+  return fila.n;
+}
+
+// Borra TODO el historial de un jalón -- nunca un registro suelto (no hay
+// forma de editar ni borrar una entrada individual, a propósito: es una
+// bitácora de auditoría, no una lista editable). Lo decide el administrador
+// desde la pantalla, con su propia confirmación ahí.
+export function borrarBitacora(): number {
+  const total = contarBitacora();
+  db.exec('DELETE FROM bitacora');
+  return total;
 }

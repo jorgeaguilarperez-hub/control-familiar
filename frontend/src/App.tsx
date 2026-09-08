@@ -9,6 +9,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Reportes } from './pages/Reportes';
 import { Familia } from './pages/Familia';
 import { Admin } from './pages/Admin';
+import { Bitacora } from './pages/Bitacora';
 import { Layout } from './components/Layout';
 
 function Portada() {
@@ -96,6 +97,16 @@ function Rutas() {
             <Privado>
               <SoloAdmin>
                 <Admin />
+              </SoloAdmin>
+            </Privado>
+          }
+        />
+        <Route
+          path="/bitacora"
+          element={
+            <Privado>
+              <SoloAdmin>
+                <Bitacora />
               </SoloAdmin>
             </Privado>
           }

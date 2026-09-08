@@ -35,6 +35,9 @@ const {
   credencialesDeMiembro,
   marcarInteraccion,
   sesionSigueActiva,
+  listarBitacora,
+  contarBitacora,
+  contarIpsSospechosas,
   db,
 } = await import('./lib/db.js');
 const { estadoDePresupuesto } = await import('./lib/presupuestos.js');
@@ -371,6 +374,139 @@ async function main() {
   });
   ok(reactivarAdminOriginal.statusCode === 200, 'se restaura al admin original como activo');
   eliminarMiembro(otroAdmin.id);
+
+  // --- Bitácora de accesos y de operación: el administrador debe poder
+  // revisar qué se hizo y quién entró (o intentó entrar); nadie más.
+  const bitacoraAntes = contarBitacora();
+
+  // Se crea vía la ruta HTTP real (no la función de base de datos directa)
+  // porque el registro en la bitácora se hace en la capa de rutas, no en
+  // db.ts -- así se prueba lo que de verdad ejecuta a alguien usando la
+  // aplicación.
+  const cookieAdminParaBitacora = cookieDeSesion(admin);
+  const altaMiembroBitacora = await app.inject({
+    method: 'POST',
+    url: '/api/miembros',
+    headers: { cookie: cookieAdminParaBitacora },
+    payload: { nombre: 'Miembro para la bitácora', casaIds: [casa.id] },
+  });
+  ok(altaMiembroBitacora.statusCode === 200, 'se da de alta al miembro de prueba para la bitácora');
+  const miembroBitacora = altaMiembroBitacora.json().miembro;
+  ok(
+    contarBitacora() === bitacoraAntes + 1,
+    'crear un miembro deja una entrada nueva en la bitácora (categoría operación)'
+  );
+  ok(
+    listarBitacora({ limite: 1 }).entradas[0]?.tipo === 'miembro_creado',
+    'la entrada más reciente refleja el alta del miembro que se acaba de crear'
+  );
+
+  const editarMiembroBitacora = await app.inject({
+    method: 'PATCH',
+    url: `/api/miembros/${miembroBitacora.id}`,
+    headers: { cookie: cookieAdminParaBitacora },
+    payload: { nombre: 'Miembro para la bitácora (renombrado)' },
+  });
+  ok(editarMiembroBitacora.statusCode === 200, 'se edita al miembro de prueba para la bitácora');
+  ok(
+    listarBitacora({ limite: 1 }).entradas[0]?.tipo === 'miembro_editado',
+    'editar un miembro deja una entrada en la bitácora'
+  );
+
+  const cookieAdminBitacora = cookieDeSesion(admin);
+  const gastoBitacora = await app.inject({
+    method: 'POST',
+    url: '/api/gastos',
+    headers: { cookie: cookieDeSesion(miembroBitacora) },
+    payload: { casaId: casa.id, categoriaId: categoria.id, monto: 200, fecha: '2026-09-05' },
+  });
+  ok(gastoBitacora.statusCode === 200, 'se registra el gasto de prueba para la bitácora');
+  ok(
+    listarBitacora({ limite: 1 }).entradas[0]?.tipo === 'gasto_creado' &&
+      listarBitacora({ limite: 1 }).entradas[0]?.descripcion.includes('$200'),
+    'registrar un gasto deja una entrada legible en la bitácora, con el monto incluido'
+  );
+
+  // La bitácora es solo del administrador: un miembro normal no puede
+  // verla ni borrarla, a diferencia del resto del sistema (donde todos ven
+  // los gastos de todos).
+  const bitacoraSinAdmin = await app.inject({
+    method: 'GET',
+    url: '/api/bitacora',
+    headers: { cookie: cookieDeSesion(miembroBitacora) },
+  });
+  ok(bitacoraSinAdmin.statusCode === 403, 'un miembro normal no puede consultar la bitácora');
+
+  const borrarBitacoraSinAdmin = await app.inject({
+    method: 'DELETE',
+    url: '/api/bitacora',
+    headers: { cookie: cookieDeSesion(miembroBitacora) },
+  });
+  ok(borrarBitacoraSinAdmin.statusCode === 403, 'un miembro normal tampoco puede borrar el historial de la bitácora');
+
+  const bitacoraConAdmin = await app.inject({
+    method: 'GET',
+    url: '/api/bitacora?filtro=operacion&limite=2',
+    headers: { cookie: cookieAdminBitacora },
+  });
+  const cuerpoBitacora = bitacoraConAdmin.json();
+  ok(
+    bitacoraConAdmin.statusCode === 200 && cuerpoBitacora.entradas.length === 2 && cuerpoBitacora.hayMas === true,
+    'GET /api/bitacora (admin) respeta el filtro por categoría y el límite, y avisa que hay más'
+  );
+  ok(
+    cuerpoBitacora.entradas.every((e: any) => e.categoria === 'operacion'),
+    'con filtro=operacion, ninguna entrada devuelta es de categoría "acceso"'
+  );
+
+  // Paginado por cursor: pedir "lo que sigue" del último id de la primera
+  // página no debe repetir ninguna entrada.
+  const segundaPagina = await app.inject({
+    method: 'GET',
+    url: `/api/bitacora?filtro=operacion&limite=2&antesDe=${cuerpoBitacora.entradas[1].id}`,
+    headers: { cookie: cookieAdminBitacora },
+  });
+  const idsPrimeraPagina = new Set(cuerpoBitacora.entradas.map((e: any) => e.id));
+  ok(
+    segundaPagina.statusCode === 200 && segundaPagina.json().entradas.every((e: any) => !idsPrimeraPagina.has(e.id)),
+    'el paginado por cursor (antesDe) no repite ninguna entrada de la página anterior'
+  );
+
+  // --- Intentos de acceso fallidos: se registran aunque nunca haya
+  // existido sesión, y varios seguidos desde el mismo origen deben
+  // marcarse como sospechosos.
+  for (let i = 0; i < 3; i++) {
+    const opcionesLoginFallido = await app.inject({ method: 'POST', url: '/api/auth/login/opciones' });
+    const { requestId } = opcionesLoginFallido.json();
+    const intentoFallido = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login/verificar',
+      payload: { requestId, response: { id: 'passkey-que-no-existe' } },
+    });
+    ok(intentoFallido.statusCode === 400, `intento de login con passkey inexistente #${i + 1} se rechaza`);
+  }
+  ok(
+    listarBitacora({ filtro: 'acceso', limite: 3 }).entradas.every((e) => e.tipo === 'login_fallido'),
+    'los tres intentos fallidos quedaron registrados como login_fallido en la bitácora'
+  );
+  ok(
+    contarIpsSospechosas().some((s) => s.intentos >= 3),
+    'tres intentos fallidos desde el mismo origen en 24h se marcan como IP sospechosa'
+  );
+
+  // --- Borrado manual del historial: no hay expiración automática (Jorge
+  // pidió decidir él mismo cuándo se borra) -- un botón de admin lo vacía
+  // por completo, y deja una última entrada anotando el propio borrado.
+  const totalAntesDeBorrar = contarBitacora();
+  const borrarTodo = await app.inject({ method: 'DELETE', url: '/api/bitacora', headers: { cookie: cookieAdminBitacora } });
+  ok(borrarTodo.statusCode === 200 && borrarTodo.json().eliminadas === totalAntesDeBorrar, 'DELETE /api/bitacora borra todo lo que había');
+  ok(contarBitacora() === 1, 'tras borrar todo, solo queda la entrada que anota el propio borrado (transparencia)');
+  ok(
+    listarBitacora({ limite: 1 }).entradas[0]?.tipo === 'bitacora_borrada',
+    'esa entrada final es del tipo "bitacora_borrada"'
+  );
+
+  eliminarMiembro(miembroBitacora.id);
 
   // --- Cierre de sesión por inactividad: si no hubo ninguna interacción
   // real (POST /api/auth/actividad) en los últimos 30s, requireAuth debe

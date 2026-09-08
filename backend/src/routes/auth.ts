@@ -24,6 +24,7 @@ import {
 import { guardarChallenge, tomarChallenge } from '../lib/challengeStore.js';
 import { requireAuth, identificarSiHaySesion } from '../lib/authGuard.js';
 import { firmarSesion, COOKIE } from '../lib/jwt.js';
+import { bitacora } from '../lib/bitacora.js';
 
 const RP_ID = process.env.RP_ID || 'localhost';
 const RP_NAME = process.env.RP_NAME || 'Control Familiar';
@@ -133,12 +134,26 @@ export default async function authRoutes(app: FastifyInstance) {
         await completarRegistro(miembroId, response, entrada.challenge);
       } catch (err) {
         req.log.error(err);
+        bitacora(req, {
+          miembroId: miembro.id,
+          nombreActor: miembro.nombre,
+          tipo: 'registro_fallido',
+          categoria: 'acceso',
+          descripcion: `No se pudo verificar la passkey al intentar fundar el sistema (${miembro.nombre})`,
+        });
         return reply.code(400).send({ error: 'No se pudo verificar la passkey' });
       }
 
       const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: 'admin' });
       reply.setCookie(COOKIE.name, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: COOKIE.maxAge });
       marcarInteraccion(miembro.id); // arranca el reloj de inactividad justo al entrar
+      bitacora(req, {
+        miembroId: miembro.id,
+        nombreActor: miembro.nombre,
+        tipo: 'registro_passkey',
+        categoria: 'acceso',
+        descripcion: `${miembro.nombre} registró su passkey y fundó el sistema como administrador`,
+      });
       return { ok: true, miembro: miembroParaCliente(miembro) };
     }
   );
@@ -189,10 +204,22 @@ export default async function authRoutes(app: FastifyInstance) {
       const response = req.body?.response;
       if (!response) return reply.code(400).send({ error: 'Solicitud inválida' });
 
+      // Se anota ANTES de completar el registro si ya tenía alguna passkey,
+      // para poder distinguir en la bitácora "se registró por primera vez"
+      // de "agregó una adicional" (por ejemplo porque perdió su teléfono).
+      const yaTeniaPasskey = credencialesDeMiembro(miembro.id).length > 0;
+
       try {
         await completarRegistro(miembro.id, response, entrada.challenge);
       } catch (err) {
         req.log.error(err);
+        bitacora(req, {
+          miembroId: miembro.id,
+          nombreActor: miembro.nombre,
+          tipo: 'registro_fallido',
+          categoria: 'acceso',
+          descripcion: `No se pudo verificar la passkey al intentar registrarse (${miembro.nombre})`,
+        });
         return reply.code(400).send({ error: 'No se pudo verificar la passkey' });
       }
 
@@ -201,6 +228,15 @@ export default async function authRoutes(app: FastifyInstance) {
       const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: miembro.rol });
       reply.setCookie(COOKIE.name, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: COOKIE.maxAge });
       marcarInteraccion(miembro.id); // arranca el reloj de inactividad justo al entrar
+      bitacora(req, {
+        miembroId: miembro.id,
+        nombreActor: miembro.nombre,
+        tipo: yaTeniaPasskey ? 'passkey_agregada' : 'registro_passkey',
+        categoria: 'acceso',
+        descripcion: yaTeniaPasskey
+          ? `${miembro.nombre} agregó una passkey adicional`
+          : `${miembro.nombre} registró su passkey por primera vez`,
+      });
       return { ok: true, miembro: miembroParaCliente(miembro) };
     }
   );
@@ -232,7 +268,21 @@ export default async function authRoutes(app: FastifyInstance) {
       if (!entrada) return reply.code(400).send({ error: 'El reto expiró, intenta de nuevo' });
 
       const credencial = buscarCredencialPorId(response.id);
-      if (!credencial) return reply.code(400).send({ error: 'Esta passkey no está registrada aquí' });
+      if (!credencial) {
+        bitacora(req, {
+          miembroId: null,
+          nombreActor: 'Desconocido',
+          tipo: 'login_fallido',
+          categoria: 'acceso',
+          descripcion: 'Intento de acceso con una passkey no registrada en el sistema',
+        });
+        return reply.code(400).send({ error: 'Esta passkey no está registrada aquí' });
+      }
+
+      // A partir de aquí ya se sabe de quién es la credencial, aunque la
+      // verificación falle más adelante -- eso es justo lo que hace valiosa
+      // a esta bitácora (saber QUIÉN intentó, no solo que algo falló).
+      const nombreIntento = buscarMiembroPorId(credencial.miembro.id)?.nombre ?? 'Desconocido';
 
       let verificacion;
       try {
@@ -250,19 +300,51 @@ export default async function authRoutes(app: FastifyInstance) {
         });
       } catch (err) {
         req.log.error(err);
+        bitacora(req, {
+          miembroId: credencial.miembro.id,
+          nombreActor: nombreIntento,
+          tipo: 'login_fallido',
+          categoria: 'acceso',
+          descripcion: `Intento de acceso fallido de ${nombreIntento} (no se pudo verificar la passkey)`,
+        });
         return reply.code(400).send({ error: 'No se pudo verificar la passkey' });
       }
 
-      if (!verificacion.verified) return reply.code(400).send({ error: 'Passkey no verificada' });
+      if (!verificacion.verified) {
+        bitacora(req, {
+          miembroId: credencial.miembro.id,
+          nombreActor: nombreIntento,
+          tipo: 'login_fallido',
+          categoria: 'acceso',
+          descripcion: `Intento de acceso fallido de ${nombreIntento} (passkey no verificada)`,
+        });
+        return reply.code(400).send({ error: 'Passkey no verificada' });
+      }
 
       actualizarContadorCredencial(credencial.id, verificacion.authenticationInfo.newCounter);
 
       const miembro = buscarMiembroPorId(credencial.miembro.id);
-      if (!miembro || !miembro.activo) return reply.code(401).send({ error: 'Esta cuenta ya no está activa' });
+      if (!miembro || !miembro.activo) {
+        bitacora(req, {
+          miembroId: credencial.miembro.id,
+          nombreActor: nombreIntento,
+          tipo: 'login_fallido',
+          categoria: 'acceso',
+          descripcion: `${nombreIntento} intentó entrar pero su cuenta está dada de baja`,
+        });
+        return reply.code(401).send({ error: 'Esta cuenta ya no está activa' });
+      }
 
       const token = firmarSesion({ miembroId: miembro.id, nombre: miembro.nombre, rol: miembro.rol });
       reply.setCookie(COOKIE.name, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge: COOKIE.maxAge });
       marcarInteraccion(miembro.id); // arranca el reloj de inactividad justo al entrar
+      bitacora(req, {
+        miembroId: miembro.id,
+        nombreActor: miembro.nombre,
+        tipo: 'login_exitoso',
+        categoria: 'acceso',
+        descripcion: `${miembro.nombre} inició sesión`,
+      });
       return { ok: true, miembro: miembroParaCliente(miembro) };
     }
   );
@@ -288,7 +370,16 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/auth/logout', { preHandler: identificarSiHaySesion }, async (req: FastifyRequest, reply) => {
-    if (req.miembro) cerrarActividad(req.miembro.miembroId);
+    if (req.miembro) {
+      cerrarActividad(req.miembro.miembroId);
+      bitacora(req, {
+        miembroId: req.miembro.miembroId,
+        nombreActor: req.miembro.nombre,
+        tipo: 'logout',
+        categoria: 'acceso',
+        descripcion: `${req.miembro.nombre} cerró sesión`,
+      });
+    }
     reply.clearCookie(COOKIE.name, { path: '/' });
     return { ok: true };
   });

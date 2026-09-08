@@ -42,16 +42,28 @@ export function Layout() {
             </NavLink>
           ))}
           {miembro?.rol === 'admin' && (
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                `px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                  isActive ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]' : 'text-[color:var(--text-dim)]'
-                }`
-              }
-            >
-              Admin
-            </NavLink>
+            <>
+              <NavLink
+                to="/admin"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    isActive ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]' : 'text-[color:var(--text-dim)]'
+                  }`
+                }
+              >
+                Admin
+              </NavLink>
+              <NavLink
+                to="/bitacora"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    isActive ? 'bg-[color:var(--surface-2)] text-[color:var(--text)]' : 'text-[color:var(--text-dim)]'
+                  }`
+                }
+              >
+                Bitácora
+              </NavLink>
+            </>
           )}
         </nav>
         <div className="flex items-center gap-3">

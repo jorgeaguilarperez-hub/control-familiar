@@ -110,6 +110,46 @@ export type Resumen = {
   porCategoria: { categoriaId: string; nombre: string; gastado: number }[];
 };
 
+export type TipoBitacora =
+  | 'login_exitoso'
+  | 'login_fallido'
+  | 'registro_passkey'
+  | 'passkey_agregada'
+  | 'registro_fallido'
+  | 'passkey_revocada'
+  | 'logout'
+  | 'cierre_por_inactividad'
+  | 'miembro_creado'
+  | 'miembro_editado'
+  | 'miembro_borrado'
+  | 'invitacion_generada'
+  | 'casa_creada'
+  | 'casa_editada'
+  | 'casa_borrada'
+  | 'categoria_creada'
+  | 'categoria_editada'
+  | 'categoria_borrada'
+  | 'gasto_creado'
+  | 'gasto_editado'
+  | 'gasto_borrado'
+  | 'presupuesto_asignado'
+  | 'bitacora_borrada';
+
+export type CategoriaBitacora = 'acceso' | 'operacion';
+export type FiltroBitacora = 'todos' | 'acceso' | 'operacion';
+
+export type EntradaBitacora = {
+  id: string;
+  creadoEn: string;
+  miembroId: string | null;
+  nombreActor: string;
+  tipo: TipoBitacora;
+  categoria: CategoriaBitacora;
+  descripcion: string;
+  ip: string | null;
+  userAgent: string | null;
+};
+
 // ---------- Llamadas ----------
 
 export const obtenerEstado = () => api.get<{ hayMiembros: boolean }>('/api/auth/estado');
@@ -165,3 +205,16 @@ export const editarGasto = (id: string, datos: { casaId: string; categoriaId: st
 export const borrarGasto = (id: string) => api.del<{ ok: true }>(`/api/gastos/${id}`);
 
 export const obtenerResumen = (periodo: string) => api.get<Resumen>(`/api/reportes/resumen?periodo=${periodo}`);
+
+export const listarBitacora = (opciones: { filtro?: FiltroBitacora; antesDe?: string; miembroId?: string; limite?: number } = {}) => {
+  const params = new URLSearchParams();
+  if (opciones.filtro) params.set('filtro', opciones.filtro);
+  if (opciones.antesDe) params.set('antesDe', opciones.antesDe);
+  if (opciones.miembroId) params.set('miembroId', opciones.miembroId);
+  if (opciones.limite) params.set('limite', String(opciones.limite));
+  const query = params.toString();
+  return api.get<{ entradas: EntradaBitacora[]; hayMas: boolean; sospechosas: { ip: string; intentos: number }[] }>(
+    `/api/bitacora${query ? `?${query}` : ''}`
+  );
+};
+export const borrarBitacora = () => api.del<{ ok: true; eliminadas: number }>('/api/bitacora');

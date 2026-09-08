@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { requireAuth } from '../lib/authGuard.js';
 import { listarGastos, crearGasto, buscarGastoPorId, editarGasto, eliminarGasto } from '../lib/db.js';
+import { bitacora } from '../lib/bitacora.js';
+
+const formatoMoneda = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 
 export default async function gastosRoutes(app: FastifyInstance) {
   // Transparencia total: cualquier miembro ve los gastos de todos.
@@ -23,7 +26,7 @@ export default async function gastosRoutes(app: FastifyInstance) {
       if (!casaId || !categoriaId || typeof monto !== 'number' || monto <= 0 || !fecha) {
         return reply.code(400).send({ error: 'Revisa casa, categoría, monto y fecha' });
       }
-      return crearGasto({
+      const gasto = crearGasto({
         miembroId: req.miembro!.miembroId,
         casaId,
         categoriaId,
@@ -31,6 +34,14 @@ export default async function gastosRoutes(app: FastifyInstance) {
         fecha,
         nota: req.body.nota?.trim() || null,
       });
+      bitacora(req, {
+        miembroId: req.miembro!.miembroId,
+        nombreActor: req.miembro!.nombre,
+        tipo: 'gasto_creado',
+        categoria: 'operacion',
+        descripcion: `${req.miembro!.nombre} registró un gasto de ${formatoMoneda.format(gasto.monto)} en ${gasto.categoriaNombre} (${gasto.casaNombre})`,
+      });
+      return gasto;
     }
   );
 
@@ -52,7 +63,15 @@ export default async function gastosRoutes(app: FastifyInstance) {
     if (!casaId || !categoriaId || typeof monto !== 'number' || monto <= 0 || !fecha) {
       return reply.code(400).send({ error: 'Revisa casa, categoría, monto y fecha' });
     }
-    return editarGasto(req.params.id, { casaId, categoriaId, monto, fecha, nota: req.body.nota?.trim() || null });
+    const actualizado = editarGasto(req.params.id, { casaId, categoriaId, monto, fecha, nota: req.body.nota?.trim() || null });
+    bitacora(req, {
+      miembroId: req.miembro!.miembroId,
+      nombreActor: req.miembro!.nombre,
+      tipo: 'gasto_editado',
+      categoria: 'operacion',
+      descripcion: `${req.miembro!.nombre} editó un gasto (ahora ${formatoMoneda.format(actualizado.monto)} en ${actualizado.categoriaNombre}, ${actualizado.casaNombre})`,
+    });
+    return actualizado;
   });
 
   app.delete<{ Params: { id: string } }>('/api/gastos/:id', { preHandler: requireAuth }, async (req, reply) => {
@@ -65,6 +84,13 @@ export default async function gastosRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'Solo puedes borrar tus propios gastos' });
     }
     eliminarGasto(req.params.id);
+    bitacora(req, {
+      miembroId: req.miembro!.miembroId,
+      nombreActor: req.miembro!.nombre,
+      tipo: 'gasto_borrado',
+      categoria: 'operacion',
+      descripcion: `${req.miembro!.nombre} borró un gasto de ${formatoMoneda.format(gasto.monto)} en ${gasto.categoriaNombre} (${gasto.casaNombre})`,
+    });
     return { ok: true };
   });
 }

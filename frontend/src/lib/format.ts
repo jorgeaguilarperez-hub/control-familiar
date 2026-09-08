@@ -43,3 +43,73 @@ export function formatearRelativo(sqliteUtc: string): string {
   const dias = Math.floor(horas / 24);
   return `hace ${dias} ${dias === 1 ? 'día' : 'días'}`;
 }
+
+function aFechaLocal(sqliteUtc: string): Date {
+  const iso = sqliteUtc.includes('T') ? sqliteUtc : `${sqliteUtc.replace(' ', 'T')}Z`;
+  return new Date(iso);
+}
+
+// Fecha y hora completas -- para la bitácora, donde sí importa el momento
+// exacto (a diferencia de "hace 2 min", que basta en la mayoría del resto
+// de la app).
+export function formatDateTime(sqliteUtc: string): string {
+  return aFechaLocal(sqliteUtc).toLocaleString('es-MX', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function esMismoDia(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Clave de agrupación por día (en la zona horaria de quien lo ve, no UTC)
+// -- para juntar bajo un mismo encabezado todas las entradas de la
+// bitácora de un mismo día.
+export function claveDia(sqliteUtc: string): string {
+  const d = aFechaLocal(sqliteUtc);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+export function formatearEncabezadoFecha(sqliteUtc: string): string {
+  const d = aFechaLocal(sqliteUtc);
+  const hoy = new Date();
+  const ayer = new Date(hoy);
+  ayer.setDate(hoy.getDate() - 1);
+
+  if (esMismoDia(d, hoy)) return 'Hoy';
+  if (esMismoDia(d, ayer)) return 'Ayer';
+
+  const texto = d.toLocaleDateString('es-MX', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: d.getFullYear() !== hoy.getFullYear() ? 'numeric' : undefined,
+  });
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+// "iPhone · Safari", "Android · Chrome" -- para la bitácora, sin depender
+// de ninguna librería: solo mira las cadenas más comunes del user-agent.
+export function formatearDispositivo(userAgent: string | null): string {
+  if (!userAgent) return 'Desconocido';
+
+  let so = 'Escritorio';
+  if (/iPhone/i.test(userAgent)) so = 'iPhone';
+  else if (/iPad/i.test(userAgent)) so = 'iPad';
+  else if (/Android/i.test(userAgent)) so = 'Android';
+  else if (/Macintosh|Mac OS X/i.test(userAgent)) so = 'Mac';
+  else if (/Windows/i.test(userAgent)) so = 'Windows';
+  else if (/Linux/i.test(userAgent)) so = 'Linux';
+
+  let navegador = '';
+  if (/EdgA|Edg\//i.test(userAgent)) navegador = 'Edge';
+  else if (/CriOS|Chrome\//i.test(userAgent)) navegador = 'Chrome';
+  else if (/FxiOS|Firefox\//i.test(userAgent)) navegador = 'Firefox';
+  else if (/Safari\//i.test(userAgent)) navegador = 'Safari';
+
+  return navegador ? `${so} · ${navegador}` : so;
+}
