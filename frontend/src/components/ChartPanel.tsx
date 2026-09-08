@@ -5,9 +5,15 @@ const PALETA = ['#22d3ee', '#a78bfa', '#fbbf24', '#34d399', '#f472b6', '#60a5fa'
 
 function TooltipMonto({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
+  // La gráfica de barras sí manda "label" (viene del eje X), pero la
+  // circular (por categoría) no -- ahí el nombre solo viene dentro de
+  // "payload" (por el nameKey="nombre" del Pie). Sin este respaldo, el
+  // tooltip de "Gasto por categoría" mostraba nada más el monto, sin decir
+  // de qué categoría era.
+  const nombre = label ?? payload[0].name ?? payload[0].payload?.nombre;
   return (
     <div className="glass rounded-lg px-3 py-2 text-sm">
-      {label && <div className="text-[color:var(--text-dim)] mb-0.5">{label}</div>}
+      {nombre && <div className="text-[color:var(--text-dim)] mb-0.5">{nombre}</div>}
       <div className="font-semibold">{formatMoney(payload[0].value)}</div>
     </div>
   );

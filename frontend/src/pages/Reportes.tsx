@@ -6,12 +6,19 @@ import { BudgetBar } from '../components/BudgetBar';
 import { Kpi } from '../components/Kpi';
 import { mensajeDeError } from '../lib/auth';
 
+// La familia empezó a usar el sistema en septiembre de 2026 -- de ahí para
+// atrás no hay ningún gasto registrado, así que no tiene caso ofrecer esos
+// meses en el selector (solo confunden, con todo en $0).
+const PRIMER_PERIODO = '2026-09';
+
 function periodosRecientes(n: number): string[] {
   const lista: string[] = [];
   const base = new Date();
   for (let i = 0; i < n; i++) {
     const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
-    lista.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    const periodo = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (periodo < PRIMER_PERIODO) break;
+    lista.push(periodo);
   }
   return lista;
 }
