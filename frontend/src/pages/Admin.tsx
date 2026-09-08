@@ -359,15 +359,22 @@ function EnlaceInvitacion({ link, onCerrar }: { link: string; onCerrar: () => vo
         <input readOnly value={link} className="flex-1 rounded-lg bg-[color:var(--surface)] px-2 py-1.5 text-xs" />
         <button
           onClick={async () => {
-            await navigator.clipboard.writeText(link);
-            setCopiado(true);
+            try {
+              await navigator.clipboard.writeText(link);
+              setCopiado(true);
+              setTimeout(() => setCopiado(false), 2000);
+            } catch {
+              // Algunos navegadores/contextos no dejan usar el portapapeles
+              // así -- el enlace de todas formas sigue visible en el campo
+              // de texto para copiarlo a mano.
+            }
           }}
-          className="text-xs px-3 py-1.5 rounded-lg border border-[color:var(--border)]"
+          className="text-xs px-3 py-1.5 rounded-lg border border-[color:var(--border)] active:scale-95 transition-transform"
         >
           {copiado ? 'Copiado ✓' : 'Copiar'}
         </button>
       </div>
-      <button onClick={onCerrar} className="text-xs text-[color:var(--text-dim)]">
+      <button onClick={onCerrar} className="text-xs text-[color:var(--text-dim)] active:scale-95 transition-transform">
         Listo
       </button>
     </div>
@@ -431,7 +438,7 @@ function CampoPresupuesto({
         <button
           onClick={guardar}
           disabled={guardando}
-          className="btn-primary rounded-lg px-2 py-1.5 text-xs flex-shrink-0"
+          className="btn-primary rounded-lg px-2 py-1.5 text-xs flex-shrink-0 disabled:opacity-60 active:scale-95 transition-transform"
         >
           {guardando ? 'Guardando…' : guardado ? 'Guardado ✓' : 'Guardar'}
         </button>
@@ -454,7 +461,9 @@ export function Admin() {
   const [nombreMiembro, setNombreMiembro] = useState('');
   const [casaIdsMiembro, setCasaIdsMiembro] = useState<string[]>([]);
   const [todasLasCasasMiembro, setTodasLasCasasMiembro] = useState(false);
+  const [dandoDeAlta, setDandoDeAlta] = useState(false);
   const [borrandoMiembroId, setBorrandoMiembroId] = useState<string | null>(null);
+  const [generandoEnlaceId, setGenerandoEnlaceId] = useState<string | null>(null);
 
   async function cargar() {
     const [c, cat, m, p] = await Promise.all([listarCasas(), listarCategorias(), listarMiembros(), obtenerPresupuestos(periodo)]);
@@ -472,6 +481,7 @@ export function Admin() {
   async function altaMiembro(e: FormEvent) {
     e.preventDefault();
     if (!nombreMiembro.trim()) return;
+    setDandoDeAlta(true);
     try {
       const { miembro, invitacion } = await crearMiembro({
         nombre: nombreMiembro.trim(),
@@ -482,9 +492,37 @@ export function Admin() {
       setCasaIdsMiembro([]);
       setTodasLasCasasMiembro(false);
       await cargar();
+      // El enlace se muestra junto a este mismo miembro más abajo, en su
+      // fila de la lista (no aquí arriba) -- así siempre aparece justo
+      // donde se generó, sea que se acabe de dar de alta o que se haya
+      // pedido para alguien que ya existía.
       setEnlacePendiente({ miembroId: miembro.id, link: `${window.location.origin}${invitacion.ruta}` });
     } catch (err) {
       setError(mensajeDeError(err));
+    } finally {
+      setDandoDeAlta(false);
+    }
+  }
+
+  async function generarEnlace(m: Miembro) {
+    // Ya tiene una passkey: esto NO la reemplaza, solo agrega una nueva
+    // (por ejemplo si perdió el teléfono donde tenía registrada la suya, o
+    // quiere entrar también desde otro dispositivo). Sin esto, perder el
+    // teléfono lo dejaba fuera para siempre.
+    if (m.tienePasskey) {
+      const confirmado = window.confirm(
+        `"${m.nombre}" ya tiene una passkey registrada. Esto genera un enlace para agregar OTRA (por ejemplo si perdió su dispositivo) -- no borra la que ya tiene. ¿Generar de todas formas?`
+      );
+      if (!confirmado) return;
+    }
+    setGenerandoEnlaceId(m.id);
+    try {
+      const { invitacion } = await regenerarInvitacion(m.id);
+      setEnlacePendiente({ miembroId: m.id, link: `${window.location.origin}${invitacion.ruta}` });
+    } catch (err) {
+      setError(mensajeDeError(err));
+    } finally {
+      setGenerandoEnlaceId(null);
     }
   }
 
@@ -611,11 +649,16 @@ export function Admin() {
               }}
             />
           </div>
-          <button className="btn-primary rounded-xl px-4 py-2 text-sm">Dar de alta</button>
+          <button
+            disabled={dandoDeAlta}
+            className="btn-primary rounded-xl px-4 py-2 text-sm disabled:opacity-60 active:scale-95 transition-transform"
+          >
+            {dandoDeAlta ? 'Dando de alta…' : 'Dar de alta'}
+          </button>
         </form>
-        {enlacePendiente && (
-          <EnlaceInvitacion link={enlacePendiente.link} onCerrar={() => setEnlacePendiente(null)} />
-        )}
+        <p className="text-xs text-[color:var(--text-dim)]">
+          Su enlace de invitación aparece junto a su nombre, más abajo en "Presupuesto individual de cada miembro".
+        </p>
       </section>
 
       <section className="glass rounded-2xl p-5 space-y-4">
@@ -727,37 +770,26 @@ export function Admin() {
               </div>
 
               <button
-                onClick={async () => {
-                  // Ya tiene una passkey: esto NO la reemplaza, solo agrega
-                  // una nueva (por ejemplo si perdió el teléfono donde tenía
-                  // registrada la suya, o quiere entrar también desde otro
-                  // dispositivo). Sin esto, perder el teléfono lo dejaba
-                  // fuera para siempre.
-                  if (m.tienePasskey) {
-                    const confirmado = window.confirm(
-                      `"${m.nombre}" ya tiene una passkey registrada. Esto genera un enlace para agregar OTRA (por ejemplo si perdió su dispositivo) -- no borra la que ya tiene. ¿Generar de todas formas?`
-                    );
-                    if (!confirmado) return;
-                  }
-                  try {
-                    const { invitacion } = await regenerarInvitacion(m.id);
-                    setEnlacePendiente({ miembroId: m.id, link: `${window.location.origin}${invitacion.ruta}` });
-                  } catch (err) {
-                    setError(mensajeDeError(err));
-                  }
-                }}
-                className="text-xs px-2 py-1.5 rounded-lg border border-[color:var(--border)] text-[color:var(--text-dim)]"
+                onClick={() => generarEnlace(m)}
+                disabled={generandoEnlaceId === m.id}
+                className="text-xs px-2 py-1.5 rounded-lg border border-[color:var(--border)] text-[color:var(--text-dim)] disabled:opacity-60 active:scale-95 transition-transform"
               >
-                {m.tienePasskey ? 'Agregar otra passkey' : 'Generar enlace'}
+                {generandoEnlaceId === m.id ? 'Generando…' : m.tienePasskey ? 'Agregar otra passkey' : 'Generar enlace'}
               </button>
 
               <button
                 onClick={() => borrarMiembroConfirmado(m)}
                 disabled={borrandoMiembroId === m.id}
-                className="text-xs px-2 py-1.5 rounded-lg border border-[color:var(--border)] text-[color:var(--text-dim)] hover:text-[color:var(--bad)]"
+                className="text-xs px-2 py-1.5 rounded-lg border border-[color:var(--border)] text-[color:var(--text-dim)] hover:text-[color:var(--bad)] disabled:opacity-60"
               >
                 {borrandoMiembroId === m.id ? 'Borrando…' : 'Borrar'}
               </button>
+
+              {enlacePendiente?.miembroId === m.id && (
+                <div className="w-full">
+                  <EnlaceInvitacion link={enlacePendiente.link} onCerrar={() => setEnlacePendiente(null)} />
+                </div>
+              )}
             </div>
           ))}
         </div>
