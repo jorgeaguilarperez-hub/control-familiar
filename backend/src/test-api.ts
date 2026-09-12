@@ -85,6 +85,36 @@ async function main() {
   asignarPresupuesto(miembro.id, '2026-09', 1000);
   crearGasto({ miembroId: miembro.id, casaId: casa.id, categoriaId: categoria.id, monto: 850, fecha: '2026-09-05', nota: null });
 
+  // --- Filtrar gastos por categoría (además de por periodo/casa/miembro,
+  // que ya existían) -- lo usa el detalle que se abre al dar doble clic en
+  // una rebanada de "Gasto por categoría" en Reportes.
+  const categoriaParaFiltro = crearCategoria('Categoría para filtro');
+  const gastoOtraCategoria = crearGasto({
+    miembroId: miembro.id,
+    casaId: casa.id,
+    categoriaId: categoriaParaFiltro.id,
+    monto: 123,
+    fecha: '2026-09-06',
+    nota: null,
+  });
+  ok(
+    listarGastos({ categoriaId: categoriaParaFiltro.id }).length === 1 &&
+      listarGastos({ categoriaId: categoriaParaFiltro.id })[0].id === gastoOtraCategoria.id,
+    'listarGastos con categoriaId solo trae los gastos de esa categoría'
+  );
+  const cookieParaFiltroCategoria = cookieDeSesion(miembro);
+  const gastosPorCategoriaHttp = await app.inject({
+    method: 'GET',
+    url: `/api/gastos?categoriaId=${categoriaParaFiltro.id}`,
+    headers: { cookie: cookieParaFiltroCategoria },
+  });
+  ok(
+    gastosPorCategoriaHttp.statusCode === 200 &&
+      gastosPorCategoriaHttp.json().every((g: any) => g.categoriaId === categoriaParaFiltro.id),
+    'GET /api/gastos?categoriaId también filtra por categoría'
+  );
+  eliminarCategoria(categoriaParaFiltro.id);
+
   ok(estadoDePresupuesto(850, 1000) === 'aviso', 'al 85% del presupuesto el estado es "aviso"');
   ok(estadoDePresupuesto(1000, 1000) === 'alerta', 'al 100% del presupuesto el estado es "alerta"');
   ok(estadoDePresupuesto(200, 1000) === 'ok', 'muy por debajo del presupuesto el estado es "ok"');

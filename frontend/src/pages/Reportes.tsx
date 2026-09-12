@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { obtenerResumen, type Resumen } from '../lib/api';
 import { formatMoney, formatPeriodo, periodoActualISO } from '../lib/format';
 import { GraficaBarras, GraficaCircular, Leyenda } from '../components/ChartPanel';
+import { DetalleGastos, type FiltroDetalle } from '../components/DetalleGastos';
 import { BudgetBar } from '../components/BudgetBar';
 import { Kpi } from '../components/Kpi';
 import { mensajeDeError } from '../lib/auth';
@@ -27,6 +28,9 @@ export function Reportes() {
   const [periodo, setPeriodo] = useState(periodoActualISO());
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [error, setError] = useState('');
+  // Doble clic en una barra, una rebanada o una fila de "por miembro" abre
+  // el detalle de los gastos que la componen (ver DetalleGastos).
+  const [detalle, setDetalle] = useState<FiltroDetalle | null>(null);
 
   useEffect(() => {
     obtenerResumen(periodo)
@@ -66,10 +70,15 @@ export function Reportes() {
           </div>
 
           <div className="glass rounded-2xl p-5">
-            <h2 className="heading text-base font-semibold mb-4">Por miembro</h2>
+            <h2 className="heading text-base font-semibold mb-1">Por miembro</h2>
+            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-3">Doble clic en alguien para ver el detalle de sus gastos.</p>
             <div className="space-y-4">
               {resumen.porMiembro.map((m) => (
-                <div key={m.miembroId}>
+                <div
+                  key={m.miembroId}
+                  onDoubleClick={() => setDetalle({ tipo: 'miembro', miembroId: m.miembroId, nombre: m.nombre })}
+                  className="cursor-pointer"
+                >
                   <div className="text-sm font-medium mb-1">
                     {m.nombre}
                     {m.casaNombre && <span className="text-[color:var(--text-dim)]"> · {m.casaNombre}</span>}
@@ -84,17 +93,27 @@ export function Reportes() {
           </div>
 
           <div className="glass rounded-2xl p-5">
-            <h2 className="heading text-base font-semibold mb-2">Gasto por casa</h2>
-            <GraficaBarras datos={resumen.porCasa} />
+            <h2 className="heading text-base font-semibold mb-1">Gasto por casa</h2>
+            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-2">Doble clic en una barra para ver el detalle.</p>
+            <GraficaBarras
+              datos={resumen.porCasa}
+              onDobleClic={(d) => setDetalle({ tipo: 'casa', casaId: d.casaId, nombre: d.nombre })}
+            />
           </div>
 
           <div className="glass rounded-2xl p-5">
-            <h2 className="heading text-base font-semibold mb-2">Gasto por categoría</h2>
-            <GraficaCircular datos={resumen.porCategoria} />
+            <h2 className="heading text-base font-semibold mb-1">Gasto por categoría</h2>
+            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-2">Doble clic en una rebanada para ver el detalle.</p>
+            <GraficaCircular
+              datos={resumen.porCategoria}
+              onDobleClic={(d) => setDetalle({ tipo: 'categoria', categoriaId: d.categoriaId, nombre: d.nombre })}
+            />
             <Leyenda datos={resumen.porCategoria} />
           </div>
         </>
       )}
+
+      {detalle && <DetalleGastos periodo={periodo} filtro={detalle} onCerrar={() => setDetalle(null)} />}
     </div>
   );
 }

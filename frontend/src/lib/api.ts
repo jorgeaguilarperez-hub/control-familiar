@@ -190,11 +190,12 @@ export const obtenerPresupuestos = (periodo: string) =>
 export const asignarPresupuesto = (miembroId: string, periodo: string, monto: number) =>
   api.put(`/api/presupuestos`, { miembroId, periodo, monto });
 
-export const listarGastos = (filtros: { periodo?: string; casaId?: string; miembroId?: string } = {}) => {
+export const listarGastos = (filtros: { periodo?: string; casaId?: string; miembroId?: string; categoriaId?: string } = {}) => {
   const params = new URLSearchParams();
   if (filtros.periodo) params.set('periodo', filtros.periodo);
   if (filtros.casaId) params.set('casaId', filtros.casaId);
   if (filtros.miembroId) params.set('miembroId', filtros.miembroId);
+  if (filtros.categoriaId) params.set('categoriaId', filtros.categoriaId);
   const query = params.toString();
   return api.get<Gasto[]>(`/api/gastos${query ? `?${query}` : ''}`);
 };

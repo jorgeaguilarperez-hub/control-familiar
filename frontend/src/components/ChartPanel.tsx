@@ -19,7 +19,16 @@ function TooltipMonto({ active, payload, label }: any) {
   );
 }
 
-export function GraficaBarras({ datos }: { datos: { nombre: string; gastado: number }[] }) {
+// El doble clic en una barra/rebanada avisa con el dato completo (no solo
+// el índice) para que quien la use no tenga que volver a buscarlo en su
+// propia lista -- así Reportes.tsx solo necesita leer el id que ya trae.
+export function GraficaBarras<T extends { nombre: string; gastado: number }>({
+  datos,
+  onDobleClic,
+}: {
+  datos: T[];
+  onDobleClic?: (dato: T) => void;
+}) {
   if (datos.length === 0) {
     return <p className="text-sm text-[color:var(--text-dim)] py-8 text-center">Todavía no hay gastos para graficar.</p>;
   }
@@ -31,8 +40,13 @@ export function GraficaBarras({ datos }: { datos: { nombre: string; gastado: num
         <YAxis stroke="var(--text-dim)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => formatMoney(v)} width={70} />
         <Tooltip content={<TooltipMonto />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
         <Bar dataKey="gastado" radius={[6, 6, 0, 0]}>
-          {datos.map((_, i) => (
-            <Cell key={i} fill={PALETA[i % PALETA.length]} />
+          {datos.map((d, i) => (
+            <Cell
+              key={i}
+              fill={PALETA[i % PALETA.length]}
+              cursor={onDobleClic ? 'pointer' : undefined}
+              onDoubleClick={onDobleClic ? () => onDobleClic(d) : undefined}
+            />
           ))}
         </Bar>
       </BarChart>
@@ -40,7 +54,13 @@ export function GraficaBarras({ datos }: { datos: { nombre: string; gastado: num
   );
 }
 
-export function GraficaCircular({ datos }: { datos: { nombre: string; gastado: number }[] }) {
+export function GraficaCircular<T extends { nombre: string; gastado: number }>({
+  datos,
+  onDobleClic,
+}: {
+  datos: T[];
+  onDobleClic?: (dato: T) => void;
+}) {
   if (datos.length === 0) {
     return <p className="text-sm text-[color:var(--text-dim)] py-8 text-center">Todavía no hay gastos para graficar.</p>;
   }
@@ -48,8 +68,15 @@ export function GraficaCircular({ datos }: { datos: { nombre: string; gastado: n
     <ResponsiveContainer width="100%" height={260}>
       <PieChart>
         <Pie data={datos} dataKey="gastado" nameKey="nombre" innerRadius={55} outerRadius={95} paddingAngle={2}>
-          {datos.map((_, i) => (
-            <Cell key={i} fill={PALETA[i % PALETA.length]} stroke="var(--bg)" strokeWidth={2} />
+          {datos.map((d, i) => (
+            <Cell
+              key={i}
+              fill={PALETA[i % PALETA.length]}
+              stroke="var(--bg)"
+              strokeWidth={2}
+              cursor={onDobleClic ? 'pointer' : undefined}
+              onDoubleClick={onDobleClic ? () => onDobleClic(d) : undefined}
+            />
           ))}
         </Pie>
         <Tooltip content={<TooltipMonto />} />

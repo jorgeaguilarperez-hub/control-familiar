@@ -643,7 +643,9 @@ const SELECT_GASTO = `
   JOIN categorias cat ON cat.id = g.categoria_id
 `;
 
-export function listarGastos(filtros: { periodo?: string; casaId?: string; miembroId?: string } = {}): Gasto[] {
+export function listarGastos(
+  filtros: { periodo?: string; casaId?: string; miembroId?: string; categoriaId?: string } = {}
+): Gasto[] {
   const condiciones: string[] = [];
   const params: string[] = [];
   if (filtros.periodo) {
@@ -657,6 +659,12 @@ export function listarGastos(filtros: { periodo?: string; casaId?: string; miemb
   if (filtros.miembroId) {
     condiciones.push('g.miembro_id = ?');
     params.push(filtros.miembroId);
+  }
+  // Se usa, entre otras cosas, para el detalle que se abre al hacer doble
+  // clic en una rebanada de "Gasto por categoría" en Reportes.
+  if (filtros.categoriaId) {
+    condiciones.push('g.categoria_id = ?');
+    params.push(filtros.categoriaId);
   }
   const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
   return db.prepare(`${SELECT_GASTO} ${where} ORDER BY g.fecha DESC, g.creado_en DESC`).all(...params) as Gasto[];

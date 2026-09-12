@@ -7,7 +7,7 @@ const formatoMoneda = new Intl.NumberFormat('es-MX', { style: 'currency', curren
 
 export default async function gastosRoutes(app: FastifyInstance) {
   // Transparencia total: cualquier miembro ve los gastos de todos.
-  app.get<{ Querystring: { periodo?: string; casaId?: string; miembroId?: string } }>(
+  app.get<{ Querystring: { periodo?: string; casaId?: string; miembroId?: string; categoriaId?: string } }>(
     '/api/gastos',
     { preHandler: requireAuth },
     async (req) => listarGastos(req.query)
