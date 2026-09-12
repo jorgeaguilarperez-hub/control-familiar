@@ -28,8 +28,8 @@ export function Reportes() {
   const [periodo, setPeriodo] = useState(periodoActualISO());
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [error, setError] = useState('');
-  // Doble clic en una barra, una rebanada o una fila de "por miembro" abre
-  // el detalle de los gastos que la componen (ver DetalleGastos).
+  // Clic en una barra, una rebanada o una fila de "por miembro" abre el
+  // detalle de los gastos que la componen (ver DetalleGastos).
   const [detalle, setDetalle] = useState<FiltroDetalle | null>(null);
 
   useEffect(() => {
@@ -71,12 +71,12 @@ export function Reportes() {
 
           <div className="glass rounded-2xl p-5">
             <h2 className="heading text-base font-semibold mb-1">Por miembro</h2>
-            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-3">Doble clic en alguien para ver el detalle de sus gastos.</p>
+            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-3">Clic en alguien para ver el detalle de sus gastos.</p>
             <div className="space-y-4">
               {resumen.porMiembro.map((m) => (
                 <div
                   key={m.miembroId}
-                  onDoubleClick={() => setDetalle({ tipo: 'miembro', miembroId: m.miembroId, nombre: m.nombre })}
+                  onClick={() => setDetalle({ tipo: 'miembro', miembroId: m.miembroId, nombre: m.nombre })}
                   className="cursor-pointer"
                 >
                   <div className="text-sm font-medium mb-1">
@@ -94,19 +94,19 @@ export function Reportes() {
 
           <div className="glass rounded-2xl p-5">
             <h2 className="heading text-base font-semibold mb-1">Gasto por casa</h2>
-            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-2">Doble clic en una barra para ver el detalle.</p>
+            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-2">Clic en una barra para ver el detalle.</p>
             <GraficaBarras
               datos={resumen.porCasa}
-              onDobleClic={(d) => setDetalle({ tipo: 'casa', casaId: d.casaId, nombre: d.nombre })}
+              onClic={(d) => setDetalle({ tipo: 'casa', casaId: d.casaId, nombre: d.nombre })}
             />
           </div>
 
           <div className="glass rounded-2xl p-5">
             <h2 className="heading text-base font-semibold mb-1">Gasto por categoría</h2>
-            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-2">Doble clic en una rebanada para ver el detalle.</p>
+            <p className="text-xs text-[color:var(--text-dim)] -mt-1 mb-2">Clic en una rebanada para ver el detalle.</p>
             <GraficaCircular
               datos={resumen.porCategoria}
-              onDobleClic={(d) => setDetalle({ tipo: 'categoria', categoriaId: d.categoriaId, nombre: d.nombre })}
+              onClic={(d) => setDetalle({ tipo: 'categoria', categoriaId: d.categoriaId, nombre: d.nombre })}
             />
             <Leyenda datos={resumen.porCategoria} />
           </div>

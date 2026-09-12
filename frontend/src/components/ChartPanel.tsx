@@ -19,15 +19,15 @@ function TooltipMonto({ active, payload, label }: any) {
   );
 }
 
-// El doble clic en una barra/rebanada avisa con el dato completo (no solo
-// el índice) para que quien la use no tenga que volver a buscarlo en su
+// El clic en una barra/rebanada avisa con el dato completo (no solo el
+// índice) para que quien lo use no tenga que volver a buscarlo en su
 // propia lista -- así Reportes.tsx solo necesita leer el id que ya trae.
 export function GraficaBarras<T extends { nombre: string; gastado: number }>({
   datos,
-  onDobleClic,
+  onClic,
 }: {
   datos: T[];
-  onDobleClic?: (dato: T) => void;
+  onClic?: (dato: T) => void;
 }) {
   if (datos.length === 0) {
     return <p className="text-sm text-[color:var(--text-dim)] py-8 text-center">Todavía no hay gastos para graficar.</p>;
@@ -44,8 +44,8 @@ export function GraficaBarras<T extends { nombre: string; gastado: number }>({
             <Cell
               key={i}
               fill={PALETA[i % PALETA.length]}
-              cursor={onDobleClic ? 'pointer' : undefined}
-              onDoubleClick={onDobleClic ? () => onDobleClic(d) : undefined}
+              cursor={onClic ? 'pointer' : undefined}
+              onClick={onClic ? () => onClic(d) : undefined}
             />
           ))}
         </Bar>
@@ -56,10 +56,10 @@ export function GraficaBarras<T extends { nombre: string; gastado: number }>({
 
 export function GraficaCircular<T extends { nombre: string; gastado: number }>({
   datos,
-  onDobleClic,
+  onClic,
 }: {
   datos: T[];
-  onDobleClic?: (dato: T) => void;
+  onClic?: (dato: T) => void;
 }) {
   if (datos.length === 0) {
     return <p className="text-sm text-[color:var(--text-dim)] py-8 text-center">Todavía no hay gastos para graficar.</p>;
@@ -74,8 +74,8 @@ export function GraficaCircular<T extends { nombre: string; gastado: number }>({
               fill={PALETA[i % PALETA.length]}
               stroke="var(--bg)"
               strokeWidth={2}
-              cursor={onDobleClic ? 'pointer' : undefined}
-              onDoubleClick={onDobleClic ? () => onDobleClic(d) : undefined}
+              cursor={onClic ? 'pointer' : undefined}
+              onClick={onClic ? () => onClic(d) : undefined}
             />
           ))}
         </Pie>
