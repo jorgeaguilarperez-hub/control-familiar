@@ -600,6 +600,20 @@ export function listarPresupuestosDePeriodo(periodo: string): Presupuesto[] {
     .all(periodo) as Presupuesto[];
 }
 
+// El histórico completo (todos los periodos), con el nombre del miembro ya
+// resuelto -- lo usa la exportación a Excel, donde hace falta ver quién es
+// quién sin tener que cruzarlo aparte.
+export function listarTodosLosPresupuestos(): (Presupuesto & { miembroNombre: string })[] {
+  return db
+    .prepare(
+      `SELECT p.id, p.miembro_id as miembroId, p.periodo, p.monto, m.nombre as miembroNombre
+       FROM presupuestos p
+       JOIN miembros m ON m.id = p.miembro_id
+       ORDER BY p.periodo DESC, m.nombre ASC`
+    )
+    .all() as (Presupuesto & { miembroNombre: string })[];
+}
+
 export function asignarPresupuesto(miembroId: string, periodo: string, monto: number): Presupuesto {
   const existente = presupuestoDeMiembro(miembroId, periodo);
   if (existente) {

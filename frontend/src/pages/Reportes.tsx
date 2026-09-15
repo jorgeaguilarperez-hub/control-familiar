@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { obtenerResumen, type Resumen } from '../lib/api';
+import { obtenerResumen, exportarExcel, type Resumen } from '../lib/api';
 import { formatMoney, formatPeriodo, periodoActualISO } from '../lib/format';
 import { GraficaBarras, GraficaCircular, Leyenda } from '../components/ChartPanel';
 import { DetalleGastos, type FiltroDetalle } from '../components/DetalleGastos';
 import { BudgetBar } from '../components/BudgetBar';
 import { Kpi } from '../components/Kpi';
-import { mensajeDeError } from '../lib/auth';
+import { mensajeDeError, useAuth } from '../lib/auth';
 
 // La familia empezó a usar el sistema en septiembre de 2026 -- de ahí para
 // atrás no hay ningún gasto registrado, así que no tiene caso ofrecer esos
@@ -25,12 +25,26 @@ function periodosRecientes(n: number): string[] {
 }
 
 export function Reportes() {
+  const { miembro: yo } = useAuth();
   const [periodo, setPeriodo] = useState(periodoActualISO());
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [error, setError] = useState('');
   // Clic en una barra, una rebanada o una fila de "por miembro" abre el
   // detalle de los gastos que la componen (ver DetalleGastos).
   const [detalle, setDetalle] = useState<FiltroDetalle | null>(null);
+  const [exportando, setExportando] = useState(false);
+
+  async function exportar() {
+    setExportando(true);
+    setError('');
+    try {
+      await exportarExcel();
+    } catch (err) {
+      setError(mensajeDeError(err));
+    } finally {
+      setExportando(false);
+    }
+  }
 
   async function cargarResumen() {
     try {
@@ -51,19 +65,30 @@ export function Reportes() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="heading text-xl font-semibold">Reportes</h1>
-        <select
-          value={periodo}
-          onChange={(e) => setPeriodo(e.target.value)}
-          className="rounded-xl bg-[color:var(--surface-2)] border border-[color:var(--border)] px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-        >
-          {periodosRecientes(6).map((p) => (
-            <option key={p} value={p}>
-              {formatPeriodo(p)}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          {yo?.rol === 'admin' && (
+            <button
+              onClick={exportar}
+              disabled={exportando}
+              className="text-sm px-3 py-2 rounded-xl border border-[color:var(--border)] text-[color:var(--text-dim)] disabled:opacity-60 active:scale-95 transition-transform"
+            >
+              {exportando ? 'Exportando…' : 'Exportar a Excel'}
+            </button>
+          )}
+          <select
+            value={periodo}
+            onChange={(e) => setPeriodo(e.target.value)}
+            className="rounded-xl bg-[color:var(--surface-2)] border border-[color:var(--border)] px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+          >
+            {periodosRecientes(6).map((p) => (
+              <option key={p} value={p}>
+                {formatPeriodo(p)}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {error && <p className="text-sm text-[color:var(--bad)]">{error}</p>}

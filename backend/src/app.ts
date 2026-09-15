@@ -14,6 +14,7 @@ import presupuestosRoutes from './routes/presupuestos.js';
 import gastosRoutes from './routes/gastos.js';
 import reportesRoutes from './routes/reportes.js';
 import bitacoraRoutes from './routes/bitacora.js';
+import exportarRoutes from './routes/exportar.js';
 import { sembrarCategoriasIniciales } from './lib/seedData.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,7 @@ export async function buildApp(opciones: { logger?: boolean } = {}) {
   await app.register(gastosRoutes);
   await app.register(reportesRoutes);
   await app.register(bitacoraRoutes);
+  await app.register(exportarRoutes);
 
   app.get('/api/salud', async () => ({ ok: true, hora: new Date().toISOString() }));
 

@@ -362,6 +362,31 @@ async function main() {
   eliminarMiembro(otroMiembroCualquiera.id);
   eliminarCategoria(categoriaParaCorregir.id);
 
+  // --- Exportar todo a Excel: solo el administrador puede hacerlo, y el
+  // archivo que regresa es de verdad un .xlsx (empieza con la firma "PK" de
+  // un zip, que es justo lo que es un .xlsx por dentro).
+  const exportarSinSesion = await app.inject({ method: 'GET', url: '/api/exportar/excel' });
+  ok(exportarSinSesion.statusCode === 401, 'sin sesión, no se puede exportar a Excel');
+
+  const exportarComoMiembro = await app.inject({
+    method: 'GET',
+    url: '/api/exportar/excel',
+    headers: { cookie: cookieDeSesion(miembro) },
+  });
+  ok(exportarComoMiembro.statusCode === 403, 'un miembro regular no puede exportar a Excel (solo el administrador)');
+
+  const exportarComoAdmin = await app.inject({
+    method: 'GET',
+    url: '/api/exportar/excel',
+    headers: { cookie: cookieAdminParaGastos },
+  });
+  ok(
+    exportarComoAdmin.statusCode === 200 &&
+      exportarComoAdmin.headers['content-type'] === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' &&
+      exportarComoAdmin.rawPayload.subarray(0, 2).toString() === 'PK',
+    'el administrador sí puede exportar, y el archivo devuelto es un .xlsx válido'
+  );
+
   // --- Borrar a un miembro (ya no "dar de baja"): también se borran sus
   // gastos y su presupuesto, sin dejar referencias rotas.
   asignarPresupuesto(miembro.id, '2026-09', 1000);

@@ -224,3 +224,26 @@ export const listarBitacora = (opciones: { filtro?: FiltroBitacora; antesDe?: st
   );
 };
 export const borrarBitacora = () => api.del<{ ok: true; eliminadas: number }>('/api/bitacora');
+
+// No pasa por `pedir` (que siempre intenta leer JSON) porque la respuesta
+// aquí es el archivo .xlsx en sí -- se pide como blob y se dispara la
+// descarga a mano, para que funcione igual en desarrollo (backend en otro
+// puerto) que en producción.
+export async function exportarExcel(): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/exportar/excel`, { credentials: 'include' });
+  if (res.status === 401) alSesionExpirada?.();
+  if (!res.ok) {
+    const esJson = res.headers.get('content-type')?.includes('application/json');
+    const cuerpo = esJson ? await res.json().catch(() => null) : null;
+    throw new ApiError(cuerpo?.error || `Error ${res.status}`, cuerpo);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `control-familiar-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
