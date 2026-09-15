@@ -201,8 +201,13 @@ export const listarGastos = (filtros: { periodo?: string; casaId?: string; miemb
 };
 export const crearGasto = (datos: { casaId: string; categoriaId: string; monto: number; fecha: string; nota?: string }) =>
   api.post<Gasto>('/api/gastos', datos);
-export const editarGasto = (id: string, datos: { casaId: string; categoriaId: string; monto: number; fecha: string; nota?: string }) =>
-  api.patch<Gasto>(`/api/gastos/${id}`, datos);
+export const editarGasto = (
+  id: string,
+  // miembroId es opcional -- solo el administrador puede reasignar un gasto
+  // a otra persona (ver DetalleGastos), cuando quedó capturado bajo el
+  // miembro equivocado.
+  datos: { miembroId?: string; casaId: string; categoriaId: string; monto: number; fecha: string; nota?: string }
+) => api.patch<Gasto>(`/api/gastos/${id}`, datos);
 export const borrarGasto = (id: string) => api.del<{ ok: true }>(`/api/gastos/${id}`);
 
 export const obtenerResumen = (periodo: string) => api.get<Resumen>(`/api/reportes/resumen?periodo=${periodo}`);

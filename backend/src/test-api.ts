@@ -28,6 +28,7 @@ const {
   eliminarCategoria,
   crearGasto,
   listarGastos,
+  eliminarGasto,
   asignarPresupuesto,
   presupuestoDeMiembro,
   buscarMiembroPorId,
@@ -293,6 +294,73 @@ async function main() {
   eliminarCategoria(categoriaBorrable2.id);
   ok(listarCategorias().find((c) => c.id === categoriaBorrable2.id) === undefined, 'borrar una categoría la quita de la lista');
   ok(listarGastos().find((g) => g.id === gastoBorrable2.id) === undefined, 'borrar una categoría borra también sus gastos');
+
+  // --- Corregir el gasto de alguien más: el administrador (no solo quien
+  // lo registró) puede editar cualquier gasto -- casa, categoría, monto,
+  // fecha -- y hasta reasignarlo a la persona correcta si quedó capturado
+  // bajo el miembro equivocado.
+  const categoriaParaCorregir = crearCategoria('Categoría a corregir');
+  const miembroDestinoCorreccion = crearMiembro({ nombre: 'Miembro destino de corrección', casaIds: [casa.id], rol: 'miembro' });
+  const otroMiembroCualquiera = crearMiembro({ nombre: 'Otro miembro cualquiera', casaIds: [casa.id], rol: 'miembro' });
+  const gastoACorregir = crearGasto({
+    miembroId: miembro.id,
+    casaId: casa.id,
+    categoriaId: categoria.id,
+    monto: 300,
+    fecha: '2026-09-07',
+    nota: 'nota original',
+  });
+
+  const editarPropioComoMiembro = await app.inject({
+    method: 'PATCH',
+    url: `/api/gastos/${gastoACorregir.id}`,
+    headers: { cookie: cookieDeSesion(miembro) },
+    payload: { casaId: casa.id, categoriaId: categoriaParaCorregir.id, monto: 320, fecha: '2026-09-07' },
+  });
+  ok(editarPropioComoMiembro.statusCode === 200, 'el dueño del gasto lo sigue pudiendo editar (categoría, monto, etc.)');
+
+  const editarAjenoComoMiembro = await app.inject({
+    method: 'PATCH',
+    url: `/api/gastos/${gastoACorregir.id}`,
+    headers: { cookie: cookieDeSesion(otroMiembroCualquiera) },
+    payload: { casaId: casa.id, categoriaId: categoria.id, monto: 999, fecha: '2026-09-07' },
+  });
+  ok(editarAjenoComoMiembro.statusCode === 403, 'un miembro regular sigue sin poder editar el gasto de alguien más');
+
+  const adminCorrigeGasto = await app.inject({
+    method: 'PATCH',
+    url: `/api/gastos/${gastoACorregir.id}`,
+    headers: { cookie: cookieAdminParaGastos },
+    payload: {
+      miembroId: miembroDestinoCorreccion.id,
+      casaId: casa.id,
+      categoriaId: categoria.id,
+      monto: 350,
+      fecha: '2026-09-08',
+    },
+  });
+  ok(
+    adminCorrigeGasto.statusCode === 200 && adminCorrigeGasto.json().miembroId === miembroDestinoCorreccion.id,
+    'el administrador puede corregir el gasto de cualquier persona y reasignarlo a quien corresponde'
+  );
+  const bitacoraTrasReasignar = listarBitacora({ limite: 1 }).entradas[0];
+  ok(
+    Boolean(bitacoraTrasReasignar?.descripcion.includes('reasignó') && bitacoraTrasReasignar?.descripcion.includes(miembroDestinoCorreccion.nombre)),
+    'la reasignación queda anotada en la bitácora, con quién lo tenía antes y a quién se le asignó'
+  );
+
+  const adminReasignaAAdmin = await app.inject({
+    method: 'PATCH',
+    url: `/api/gastos/${gastoACorregir.id}`,
+    headers: { cookie: cookieAdminParaGastos },
+    payload: { miembroId: admin.id, casaId: casa.id, categoriaId: categoria.id, monto: 350, fecha: '2026-09-08' },
+  });
+  ok(adminReasignaAAdmin.statusCode === 400, 'no se puede reasignar un gasto al propio administrador (no tiene gastos)');
+
+  eliminarGasto(gastoACorregir.id);
+  eliminarMiembro(miembroDestinoCorreccion.id);
+  eliminarMiembro(otroMiembroCualquiera.id);
+  eliminarCategoria(categoriaParaCorregir.id);
 
   // --- Borrar a un miembro (ya no "dar de baja"): también se borran sus
   // gastos y su presupuesto, sin dejar referencias rotas.

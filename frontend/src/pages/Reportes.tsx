@@ -32,10 +32,17 @@ export function Reportes() {
   // detalle de los gastos que la componen (ver DetalleGastos).
   const [detalle, setDetalle] = useState<FiltroDetalle | null>(null);
 
+  async function cargarResumen() {
+    try {
+      setResumen(await obtenerResumen(periodo));
+    } catch (err) {
+      setError(mensajeDeError(err));
+    }
+  }
+
   useEffect(() => {
-    obtenerResumen(periodo)
-      .then(setResumen)
-      .catch((err) => setError(mensajeDeError(err)));
+    cargarResumen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo]);
 
   const totalGastado = resumen?.porMiembro.reduce((s, m) => s + m.gastado, 0) ?? 0;
@@ -113,7 +120,9 @@ export function Reportes() {
         </>
       )}
 
-      {detalle && <DetalleGastos periodo={periodo} filtro={detalle} onCerrar={() => setDetalle(null)} />}
+      {detalle && (
+        <DetalleGastos periodo={periodo} filtro={detalle} onCerrar={() => setDetalle(null)} onCambio={cargarResumen} />
+      )}
     </div>
   );
 }

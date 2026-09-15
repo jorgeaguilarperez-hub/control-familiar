@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { requireAuth } from '../lib/authGuard.js';
-import { listarGastos, crearGasto, buscarGastoPorId, editarGasto, eliminarGasto } from '../lib/db.js';
+import { listarGastos, crearGasto, buscarGastoPorId, editarGasto, eliminarGasto, buscarMiembroPorId } from '../lib/db.js';
 import { bitacora } from '../lib/bitacora.js';
 
 const formatoMoneda = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
@@ -45,31 +45,53 @@ export default async function gastosRoutes(app: FastifyInstance) {
     }
   );
 
-  // Un miembro solo puede editar o borrar los gastos que él mismo capturó
-  // (el admin administra catálogos, no los gastos ajenos de otros).
+  // Un miembro regular solo puede editar los gastos que él mismo capturó.
+  // El administrador es la excepción: no registra gastos propios, pero sí
+  // es quien revisa los reportes y puede corregir el gasto de cualquier
+  // persona -- incluyendo reasignarlo a quien de verdad le corresponde, por
+  // si quedó registrado bajo el miembro equivocado.
   app.patch<{
     Params: { id: string };
-    Body: { casaId: string; categoriaId: string; monto: number; fecha: string; nota?: string };
+    Body: { miembroId?: string; casaId: string; categoriaId: string; monto: number; fecha: string; nota?: string };
   }>('/api/gastos/:id', { preHandler: requireAuth }, async (req, reply) => {
-    if (req.miembro!.rol === 'admin') {
-      return reply.code(403).send({ error: 'El administrador no tiene funciones de gastos' });
-    }
+    const esAdmin = req.miembro!.rol === 'admin';
     const gasto = buscarGastoPorId(req.params.id);
     if (!gasto) return reply.code(404).send({ error: 'Gasto no encontrado' });
-    if (gasto.miembroId !== req.miembro!.miembroId) {
+    if (!esAdmin && gasto.miembroId !== req.miembro!.miembroId) {
       return reply.code(403).send({ error: 'Solo puedes editar tus propios gastos' });
     }
     const { casaId, categoriaId, monto, fecha } = req.body || ({} as any);
     if (!casaId || !categoriaId || typeof monto !== 'number' || monto <= 0 || !fecha) {
       return reply.code(400).send({ error: 'Revisa casa, categoría, monto y fecha' });
     }
-    const actualizado = editarGasto(req.params.id, { casaId, categoriaId, monto, fecha, nota: req.body.nota?.trim() || null });
+
+    // Reasignar el gasto a otra persona: solo el administrador puede
+    // hacerlo (es quien corrige, no quien registra), y nunca hacia sí
+    // mismo, porque el admin no tiene gastos.
+    let miembroDestino: ReturnType<typeof buscarMiembroPorId> | undefined;
+    if (req.body.miembroId && req.body.miembroId !== gasto.miembroId) {
+      if (!esAdmin) return reply.code(403).send({ error: 'Solo el administrador puede reasignar un gasto a otra persona' });
+      miembroDestino = buscarMiembroPorId(req.body.miembroId);
+      if (!miembroDestino) return reply.code(404).send({ error: 'Miembro no encontrado' });
+      if (miembroDestino.rol === 'admin') return reply.code(400).send({ error: 'El administrador no puede tener gastos' });
+    }
+
+    const nombreOriginal = gasto.miembroNombre;
+    const actualizado = editarGasto(req.params.id, {
+      miembroId: miembroDestino?.id,
+      casaId,
+      categoriaId,
+      monto,
+      fecha,
+      nota: req.body.nota?.trim() || null,
+    });
+    const detalleReasignado = miembroDestino ? ` y lo reasignó de ${nombreOriginal} a ${miembroDestino.nombre}` : '';
     bitacora(req, {
-      miembroId: req.miembro!.miembroId,
+      miembroId: actualizado.miembroId,
       nombreActor: req.miembro!.nombre,
       tipo: 'gasto_editado',
       categoria: 'operacion',
-      descripcion: `${req.miembro!.nombre} editó un gasto (ahora ${formatoMoneda.format(actualizado.monto)} en ${actualizado.categoriaNombre}, ${actualizado.casaNombre})`,
+      descripcion: `${req.miembro!.nombre} editó un gasto (ahora ${formatoMoneda.format(actualizado.monto)} en ${actualizado.categoriaNombre}, ${actualizado.casaNombre})${detalleReasignado}`,
     });
     return actualizado;
   });

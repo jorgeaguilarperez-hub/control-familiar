@@ -692,12 +692,22 @@ export function crearGasto(datos: {
 
 export function editarGasto(
   id: string,
-  datos: { casaId: string; categoriaId: string; monto: number; fecha: string; nota: string | null }
+  // miembroId es opcional: solo el administrador puede reasignar un gasto a
+  // otra persona (ver PATCH /api/gastos/:id) -- cuando el propio dueño edita
+  // su gasto, se omite y el dueño no cambia.
+  datos: { miembroId?: string; casaId: string; categoriaId: string; monto: number; fecha: string; nota: string | null }
 ): Gasto {
-  db.prepare(
-    `UPDATE gastos SET casa_id = ?, categoria_id = ?, monto = ?, fecha = ?, nota = ?, actualizado_en = datetime('now')
-     WHERE id = ?`
-  ).run(datos.casaId, datos.categoriaId, datos.monto, datos.fecha, datos.nota, id);
+  if (datos.miembroId) {
+    db.prepare(
+      `UPDATE gastos SET miembro_id = ?, casa_id = ?, categoria_id = ?, monto = ?, fecha = ?, nota = ?, actualizado_en = datetime('now')
+       WHERE id = ?`
+    ).run(datos.miembroId, datos.casaId, datos.categoriaId, datos.monto, datos.fecha, datos.nota, id);
+  } else {
+    db.prepare(
+      `UPDATE gastos SET casa_id = ?, categoria_id = ?, monto = ?, fecha = ?, nota = ?, actualizado_en = datetime('now')
+       WHERE id = ?`
+    ).run(datos.casaId, datos.categoriaId, datos.monto, datos.fecha, datos.nota, id);
+  }
   return buscarGastoPorId(id)!;
 }
 
